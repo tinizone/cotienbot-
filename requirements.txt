@@ -6,7 +6,7 @@ google-cloud-firestore==2.19.0
 google-generativeai==0.8.3
 python-dotenv==1.0.1
 pydantic==2.9.2
-pydantic-settings==2.5.2
+pydantic-settings==2.5.2  # Thêm gói mới
 feedparser==6.0.11
 pytesseract==0.3.13
 Pillow==10.4.0
