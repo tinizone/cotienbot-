@@ -1,8 +1,8 @@
-# File: /main.py
+# File: /app/main.py
 from fastapi import FastAPI, Request, HTTPException
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext
-from modules.chat.handler import start, handle_message, handle_media
+from modules.chat.handler import start, handle_message, handle_media, help_command  # Thêm import
 from config.settings import settings
 import logging
 
@@ -17,6 +17,7 @@ telegram_app = Application.builder().token(settings.telegram_token).build()
 
 # Thêm các handler
 telegram_app.add_handler(CommandHandler("start", start))
+telegram_app.add_handler(CommandHandler("help", help_command))  # Thêm handler /help
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 telegram_app.add_handler(MessageHandler(filters.PHOTO | filters.VIDEO | filters.AUDIO, handle_media))
 
