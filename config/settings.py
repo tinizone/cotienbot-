@@ -1,12 +1,12 @@
 # File: /config/settings.py
-from pydantic_settings import BaseSettings
-from pydantic import validator
+from pydantic import BaseSettings, validator
 import json
 
 class Settings(BaseSettings):
     telegram_token: str
     gemini_api_key: str
     firestore_credentials: str
+    render_domain: str  # Ví dụ: your-service.onrender.com
 
     @validator("firestore_credentials")
     def validate_credentials(cls, v):
