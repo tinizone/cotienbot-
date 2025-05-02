@@ -40,12 +40,14 @@ async def root():
 @app.on_event("startup")
 async def startup_event():
     webhook_url = f"https://{settings.render_domain}/webhook"
+    logger.info(f"Attempting to set webhook to {webhook_url}")
     try:
         await telegram_app.bot.set_webhook(url=webhook_url)
-        logger.info(f"Webhook set to {webhook_url}")
+        logger.info(f"Webhook set successfully to {webhook_url}")
     except Exception as e:
         logger.error(f"Failed to set webhook: {e}")
-        raise
+        # Không raise exception để tránh crash, chỉ log lỗi
+        return
 
 @app.on_event("shutdown")
 async def shutdown_event():
