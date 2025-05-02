@@ -1,5 +1,4 @@
 # File: /main.py
-# Test CI/CD
 from fastapi import FastAPI
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 from modules.chat.handler import start, handle_message, handle_media
@@ -20,12 +19,21 @@ def init_telegram_bot():
         print(f"Failed to initialize Telegram Bot: {e}")
         raise
 
+def run_bot(telegram_app):
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        loop.run_until_complete(telegram_app.run_polling())
+    except Exception as e:
+        print(f"Error in bot polling: {e}")
+    finally:
+        loop.close()
+
 @app.on_event("startup")
 async def startup_event():
     telegram_app = init_telegram_bot()
-    def run_bot():
-        asyncio.run(telegram_app.run_polling())
-    Thread(target=run_bot, daemon=True).start()
+    bot_thread = Thread(target=run_bot, args=(telegram_app,), daemon=True)
+    bot_thread.start()
 
 @app.on_event("shutdown")
 async def shutdown_event():
