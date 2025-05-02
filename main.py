@@ -1,36 +1,53 @@
 # File: /main.py
-from fastapi import FastAPI
-from telegram.ext import Application, CommandHandler, MessageHandler, filters
+from fastapi import FastAPI, Request, HTTPException
+from telegram import Update
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext
 from modules.chat.handler import start, handle_message, handle_media
 from config.settings import settings
-import asyncio
+import logging
+
+# Cấu hình logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
-def init_telegram_bot():
+# Khởi tạo Telegram Bot
+telegram_app = Application.builder().token(settings.telegram_token).build()
+
+# Thêm các handler
+telegram_app.add_handler(CommandHandler("start", start))
+telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+telegram_app.add_handler(MessageHandler(filters.PHOTO | filters.VIDEO | filters.AUDIO, handle_media))
+
+# Endpoint để nhận webhook từ Telegram
+@app.post("/webhook")
+async def webhook(request: Request):
     try:
-        telegram_app = Application.builder().token(settings.telegram_token).build()
-        telegram_app.add_handler(CommandHandler("start", start))
-        telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-        telegram_app.add_handler(MessageHandler(filters.PHOTO | filters.VIDEO | filters.AUDIO, handle_media))
-        return telegram_app
+        update = Update.de_json(await request.json(), telegram_app.bot)
+        await telegram_app.process_update(update)
+        return {"status": "ok"}
     except Exception as e:
-        print(f"Failed to initialize Telegram Bot: {e}")
-        raise
+        logger.error(f"Error processing webhook: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-async def run_bot():
-    telegram_app = init_telegram_bot()
-    await telegram_app.run_polling()
-
-@app.on_event("startup")
-async def startup_event():
-    # Chạy bot trong background task
-    asyncio.create_task(run_bot())
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    print("Shutting down CotienBot...")
-
+# Endpoint kiểm tra server
 @app.get("/")
 async def root():
     return {"message": "CotienBot is running!"}
+
+# Thiết lập webhook khi server khởi động
+@app.on_event("startup")
+async def startup_event():
+    webhook_url = f"https://{settings.render_domain}/webhook"
+    try:
+        await telegram_app.bot.set_webhook(url=webhook_url)
+        logger.info(f"Webhook set to {webhook_url}")
+    except Exception as e:
+        logger.error(f"Failed to set webhook: {e}")
+        raise
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    await telegram_app.bot.delete_webhook()
+    logger.info("Webhook removed")
