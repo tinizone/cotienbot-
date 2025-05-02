@@ -14,4 +14,4 @@ jobs:
         run: |
           curl -X POST \
           -H "Authorization: Bearer $RENDER_API_KEY" \
-          https://api.render.com/v1/services/cotienbot.onrender.com/deploys
+          https://api.render.com/v1/services/srv-d0a6k3c9c44c738m4850/deploys
