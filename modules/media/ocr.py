@@ -1,7 +1,12 @@
-from modules.chat.gemini import get_gemini_response
+# File: /modules/media/ocr.py
+from PIL import Image
+import pytesseract
+import io
 
-def extract_text_from_image(image_content: bytes):
-    prompt = "Extract text from this image."
-    # Gemini hiện không hỗ trợ xử lý ảnh trực tiếp qua API đơn giản
-    # Dùng placeholder, sẽ tích hợp Tesseract sau
-    return get_gemini_response(prompt)
+def extract_text_from_image(image_content: bytes) -> str:
+    try:
+        img = Image.open(io.BytesIO(image_content))
+        text = pytesseract.image_to_string(img)
+        return text if text else "No text found"
+    except Exception as e:
+        return f"Error processing image: {str(e)}"
