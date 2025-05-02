@@ -25,10 +25,13 @@ telegram_app.add_handler(MessageHandler(filters.PHOTO | filters.VIDEO | filters.
 async def webhook(request: Request):
     try:
         update = Update.de_json(await request.json(), telegram_app.bot)
+        if update is None:
+            logger.error("Received invalid update from Telegram")
+            return {"status": "invalid update"}
         await telegram_app.process_update(update)
         return {"status": "ok"}
     except Exception as e:
-        logger.error(f"Error processing webhook: {e}")
+        logger.error(f"Error processing webhook: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # Endpoint kiểm tra server
@@ -39,6 +42,10 @@ async def root():
 # Thiết lập webhook khi server khởi động
 @app.on_event("startup")
 async def startup_event():
+    # Khởi tạo Telegram Application
+    await telegram_app.initialize()
+    logger.info("Telegram Application initialized")
+
     webhook_url = f"https://{settings.render_domain}/webhook"
     logger.info(f"Attempting to set webhook to {webhook_url}")
     try:
@@ -46,10 +53,10 @@ async def startup_event():
         logger.info(f"Webhook set successfully to {webhook_url}")
     except Exception as e:
         logger.error(f"Failed to set webhook: {e}")
-        # Không raise exception để tránh crash, chỉ log lỗi
         return
 
 @app.on_event("shutdown")
 async def shutdown_event():
     await telegram_app.bot.delete_webhook()
-    logger.info("Webhook removed")
+    await telegram_app.shutdown()
+    logger.info("Webhook removed and application shutdown")
