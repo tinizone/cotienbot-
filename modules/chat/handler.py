@@ -42,7 +42,6 @@ async def help_command(update: Update, context: CallbackContext) -> None:
         await update.message.reply_text(help_message)
     except Exception as e:
         logger.error(f"Error in help_command: {str(e)}")
-        await update.message.reply_text(f"Lỗi: {str(e)}")
 
 async def train_command(update: Update, context: CallbackContext) -> None:
     try:
@@ -53,8 +52,9 @@ async def train_command(update: Update, context: CallbackContext) -> None:
         info = " ".join(context.args)
         data_type = "name" if info.lower().startswith("tôi tên") else "general"
 
+        # Kiểm tra trùng lặp chi tiết hơn
         existing_data = firestore_client.get_training_data(user_id, info)
-        if existing_data:
+        if existing_data and existing_data[0]["similarity"] > 0.95:
             await update.message.reply_text(f"Thông tin '{info}' đã tồn tại (ID: {existing_data[0]['id']}), không lưu lại.")
             return
 
@@ -62,7 +62,7 @@ async def train_command(update: Update, context: CallbackContext) -> None:
         await update.message.reply_text(f"Đã lưu thông tin: {info} (ID: {doc_id})")
     except Exception as e:
         logger.error(f"Error in train_command: {str(e)}")
-        await update.message.reply_text(f"Lỗi: {str(e)}")
+        await update.message.reply_text("Lỗi khi lưu thông tin. Vui lòng thử lại sau.")
 
 async def create_quiz_command(update: Update, context: CallbackContext) -> None:
     try:
@@ -78,10 +78,10 @@ async def create_quiz_command(update: Update, context: CallbackContext) -> None:
         quiz_id = quiz_manager.create_quiz(user_id, question, correct, wrong_answers)
         await update.message.reply_text(f"Quiz created! ID: {quiz_id}")
     except ValueError as e:
-        await update.message.reply_text(f"Lỗi: {str(e)}")
+        logger.error(f"Error in create_quiz_command: {str(e)}")
     except Exception as e:
         logger.error(f"Error in create_quiz_command: {str(e)}")
-        await update.message.reply_text(f"Lỗi: {str(e)}")
+        await update.message.reply_text("Lỗi khi tạo quiz. Vui lòng thử lại sau.")
 
 async def take_quiz_command(update: Update, context: CallbackContext) -> None:
     try:
@@ -93,7 +93,7 @@ async def take_quiz_command(update: Update, context: CallbackContext) -> None:
         await update.message.reply_text(result["message"])
     except Exception as e:
         logger.error(f"Error in take_quiz_command: {str(e)}")
-        await update.message.reply_text(f"Lỗi: {str(e)}")
+        await update.message.reply_text("Lỗi khi trả lời quiz. Vui lòng thử lại sau.")
 
 async def handle_message(update: Update, context: CallbackContext) -> None:
     try:
@@ -115,7 +115,6 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
             # Kiểm tra xem dữ liệu huấn luyện có thay đổi kể từ câu trả lời trước không
             if not latest_training_timestamp or chat_timestamp >= latest_training_timestamp:
                 response = similar_chat["response"]
-                # Đảm bảo reply_text được gọi đúng
                 await update.message.reply_text(response)
                 logger.info(f"Reused response for {user_id}: {response}")
                 firestore_client.save_chat(user_id, user_message, response)
@@ -123,11 +122,11 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
 
         # Lấy dữ liệu huấn luyện liên quan
         training_data = firestore_client.get_training_data(user_id, user_message)
-        relevant_info = [data["info"] for data in training_data if data["similarity"] > 0.7]
+        relevant_info = [data["info"] for data in training_data if data["similarity"] > 0.7] if training_data else []
 
         # Lấy lịch sử trò chuyện gần đây (5 tin nhắn)
         chat_history = firestore_client.get_chat_history(user_id, limit=5)
-        context_str = "\n".join([f"User: {chat['message']}\nBot: {chat['response']}" for chat in chat_history])
+        context_str = "\n".join([f"User: {chat['message']}\nBot: {chat['response']}" for chat in chat_history]) if chat_history else ""
 
         # Tạo prompt cho Gemini
         prompt = f"""
@@ -149,7 +148,6 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
 
         # Gọi Gemini và thêm tag [Gemini]
         response = await get_gemini_response(prompt)
-        # Đảm bảo response là chuỗi trước khi thêm tag
         if not isinstance(response, str):
             logger.error(f"Gemini response is not a string: {response}")
             response = "Lỗi: Không nhận được phản hồi hợp lệ từ Gemini."
@@ -159,11 +157,7 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
         firestore_client.save_chat(user_id, user_message, tagged_response)
     except Exception as e:
         logger.error(f"Error in handle_message: {str(e)}")
-        # Sử dụng update.effective_message để an toàn hơn
-        if update and hasattr(update, "effective_message") and update.effective_message:
-            await update.effective_message.reply_text(f"Lỗi: {str(e)}")
-        else:
-            logger.error("Cannot reply to user: No effective message available.")
+        # Không gửi lỗi cho người dùng để tránh retry loop
 
 async def handle_media(update: Update, context: CallbackContext) -> None:
     try:
@@ -186,7 +180,7 @@ async def handle_media(update: Update, context: CallbackContext) -> None:
                 await update.message.reply_text(f"Lỗi: {result['message']}")
     except Exception as e:
         logger.error(f"Error in handle_media: {str(e)}")
-        await update.message.reply_text(f"Lỗi: {str(e)}")
+        await update.message.reply_text("Lỗi khi xử lý media. Vui lòng thử lại sau.")
 
 async def create_course_command(update: Update, context: CallbackContext) -> None:
     try:
@@ -202,10 +196,10 @@ async def create_course_command(update: Update, context: CallbackContext) -> Non
         course_manager.create_course(title, description, user_id)
         await update.message.reply_text(f"Khóa học '{title}' đã được tạo!")
     except ValueError as e:
-        await update.message.reply_text(f"Lỗi: {str(e)}")
+        logger.error(f"Error in create_course_command: {str(e)}")
     except Exception as e:
         logger.error(f"Error in create_course_command: {str(e)}")
-        await update.message.reply_text(f"Lỗi: {str(e)}")
+        await update.message.reply_text("Lỗi khi tạo khóa học. Vui lòng thử lại sau.")
 
 async def crawl_command(update: Update, context: CallbackContext) -> None:
     try:
@@ -220,7 +214,7 @@ async def crawl_command(update: Update, context: CallbackContext) -> None:
             await update.message.reply_text(f"Đã crawl {len(result)} bài từ {url}")
     except Exception as e:
         logger.error(f"Error in crawl_command: {str(e)}")
-        await update.message.reply_text(f"Lỗi: {str(e)}")
+        await update.message.reply_text("Lỗi khi crawl. Vui lòng thử lại sau.")
 
 async def list_courses_command(update: Update, context: CallbackContext) -> None:
     try:
@@ -233,7 +227,7 @@ async def list_courses_command(update: Update, context: CallbackContext) -> None
         await update.message.reply_text(response)
     except Exception as e:
         logger.error(f"Error in list_courses_command: {str(e)}")
-        await update.message.reply_text(f"Lỗi: {str(e)}")
+        await update.message.reply_text("Lỗi khi liệt kê khóa học. Vui lòng thử lại sau.")
 
 async def set_admin_command(update: Update, context: CallbackContext) -> None:
     try:
@@ -251,7 +245,7 @@ async def set_admin_command(update: Update, context: CallbackContext) -> None:
         await update.message.reply_text(f"Đã đặt {target_user_id} làm admin với tên {name}")
     except Exception as e:
         logger.error(f"Error in set_admin_command: {str(e)}")
-        await update.message.reply_text(f"Lỗi: {str(e)}")
+        await update.message.reply_text("Lỗi khi đặt admin. Vui lòng thử lại sau.")
 
 async def get_id_command(update: Update, context: CallbackContext) -> None:
     try:
@@ -259,4 +253,4 @@ async def get_id_command(update: Update, context: CallbackContext) -> None:
         await update.message.reply_text(f"User ID của bạn là: {user_id}")
     except Exception as e:
         logger.error(f"Error in get_id_command: {str(e)}")
-        await update.message.reply_text(f"Lỗi: {str(e)}")
+        await update.message.reply_text("Lỗi khi lấy ID. Vui lòng thử lại sau.")
