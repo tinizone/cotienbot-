@@ -1,8 +1,9 @@
+# UPDATE: requirements.txt
 fastapi==0.115.0
 uvicorn==0.30.6
 python-telegram-bot==21.5
 google-cloud-firestore==2.19.0
-google-generativeai==0.8.5  # Sửa từ 0.9.0 thành 0.8.5
+google-generativeai==0.8.5
 pydantic==2.9.2
 pydantic-settings==2.5.2
 feedparser==6.0.11
@@ -11,3 +12,7 @@ Pillow==10.4.0
 python-dotenv==1.0.1
 sentence-transformers==2.7.0
 SpeechRecognition==3.10.1
+tenacity==8.5.0  # For retries
+slowapi==0.1.9  # For rate limiting
+pytest==8.3.3  # For testing
+pytest-asyncio==0.24.0  # For async tests
