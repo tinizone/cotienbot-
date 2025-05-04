@@ -1,22 +1,14 @@
-# File: /modules/media/speech.py
-import logging
 import speech_recognition as sr
-from io import BytesIO
-from typing import Dict
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 class SpeechProcessor:
-    async def speech_to_text(self, audio_data: bytes) -> Dict:
-        """Chuyển giọng nói thành văn bản."""
+    async def speech_to_text(self, audio_data: bytes) -> dict:
+        recognizer = sr.Recognizer()
+        with sr.AudioFile(audio_data) as source:
+            audio = recognizer.record(source)
         try:
-            recognizer = sr.Recognizer()
-            with sr.AudioFile(BytesIO(audio_data)) as source:
-                audio = recognizer.record(source)
             text = recognizer.recognize_google(audio, language="vi-VN")
-            logger.info("Speech converted to text successfully")
             return {"status": "success", "text": text}
-        except Exception as e:
-            logger.error(f"Error converting speech: {str(e)}")
-            return {"status": "error", "message": str(e)}
+        except sr.UnknownValueError:
+            return {"status": "error", "message": "Could not understand audio"}
+        except sr.RequestError as e:
+            return {"status": "error", "message": f"Speech recognition error: {str(e)}"}
