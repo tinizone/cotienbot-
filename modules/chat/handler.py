@@ -100,10 +100,8 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
     try:
         user_id = str(update.message.from_user.id)
         user_message = update.message.text.lower()
-        # UPDATE: Thêm log để kiểm tra tin nhắn nhận được
         logger.info(f"Received message from {user_id}: {user_message}")
 
-        # UPDATE: Xử lý câu chào
         if user_message in ["hi", "hello", "chào"]:
             response = f"Chào bạn! Mình là CotienBot. Gõ /help để xem hướng dẫn nhé!"
             await update.message.reply_text(response)
@@ -111,13 +109,12 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
             firestore_client.save_chat(user_id, user_message, response)
             return
 
-        # Tìm trong dữ liệu đào tạo
         training_data = firestore_client.get_training_data(user_id, user_message)
         if training_data:
             info = training_data[0]["info"]
-            # UPDATE: Trả lời trực tiếp nếu câu hỏi khớp chính xác với câu đào tạo
+            # UPDATE: Tránh lặp lại câu hỏi, trả lời ngắn gọn khi khớp chính xác
             if info.lower() == user_message:
-                response = f"Đúng rồi, mình đã được đào tạo: {info}!"
+                response = "Đúng rồi, mình đã được đào tạo về điều đó!"
             elif "tên gì không" in user_message or "tên gì" in user_message:
                 name_match = re.search(r"(?:tôi|tói) tên (\w+)", info, re.IGNORECASE)
                 if name_match:
@@ -134,14 +131,23 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
                     response = f"Tói biết, bạn {age} tuổi!"
                 else:
                     response = "Tói chưa biết tuổi của bạn, bạn có thể dùng /train để cung cấp thêm thông tin nhé!"
+            elif "nhà tôi ở đâu" in user_message:
+                address_match = re.search(r"nhà ở (\w+)", info, re.IGNORECASE)
+                if address_match:
+                    address = address_match.group(1)
+                    response = f"Tói biết, nhà bạn ở {address}!"
+                else:
+                    response = "Tói chưa biết địa chỉ của bạn, bạn có thể dùng /train để cung cấp thêm thông tin nhé!"
+            elif "thời tiết hôm nay thế nào" in user_message:
+                response = "Tói chưa được đào tạo về thời tiết, để mình hỏi Gemini nhé!"  # Chuyển sang Gemini
             else:
-                response = info
+                response = info  # Nếu không khớp điều kiện, trả lại nguyên văn
             await update.message.reply_text(response)
             logger.info(f"Sent response to {user_id}: {response}")
             firestore_client.save_chat(user_id, user_message, response)
             return
 
-        # UPDATE: Gọi Gemini làm fallback nếu không tìm thấy dữ liệu đào tạo
+        # UPDATE: Đảm bảo gọi Gemini làm fallback
         response = await get_gemini_response(user_message)
         await update.message.reply_text(response)
         logger.info(f"Sent Gemini response to {user_id}: {response}")
