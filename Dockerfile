@@ -1,6 +1,7 @@
+# UPDATE: Dockerfile
 FROM python:3.11-slim
 
-# Cài dependencies
+# Cài dependencies cần thiết
 RUN apt-get update && apt-get install -y \
     tesseract-ocr \
     libtesseract-dev \
@@ -8,9 +9,17 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-# Nâng cấp pip
+
+# Nâng cấp pip và cài đặt phụ thuộc
 RUN pip install --upgrade pip
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+
+# Sao chép mã nguồn (bao gồm main.py ở root)
 COPY . .
-CMD uvicorn main:app --host 0.0.0.0 --port $PORT
+
+# Expose cổng mặc định của Render
+EXPOSE $PORT
+
+# Chạy ứng dụng với uvicorn, sử dụng main.py
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "$PORT"]
