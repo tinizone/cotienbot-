@@ -4,6 +4,7 @@ from telegram.ext import CallbackContext
 from modules.chat.gemini import get_gemini_response
 from database.firestore import FirestoreClient
 import logging
+from modules.media.speech import SpeechProcessor
 
 logger = logging.getLogger(__name__)
 firestore = FirestoreClient()
@@ -70,6 +71,31 @@ async def handle_media(update: Update, context: CallbackContext) -> None:
     try:
         media_type = "photo" if update.message.photo else "video" if update.message.video else "audio"
         await update.message.reply_text(f"Tôi đã nhận được {media_type} của bạn. Tính năng xử lý đang phát triển!")
+    except Exception as e:
+        logger.error(f"Error in handle_media: {str(e)}")
+        await update.message.reply_text(f"Lỗi: {str(e)}")
+
+# Thêm vào /modules/chat/handler.py
+
+async def handle_media(update: Update, context: CallbackContext) -> None:
+    try:
+        user_id = str(update.message.from_user.id)
+        if update.message.photo:
+            await update.message.reply_text("Tính năng xử lý ảnh đang phát triển!")
+        elif update.message.video:
+            await update.message.reply_text("Tính năng xử lý video đang phát triển!")
+        elif update.message.voice:
+            voice = update.message.voice
+            file = await voice.get_file()
+            audio_data = await file.download_as_bytearray()
+            speech = SpeechProcessor()
+            result = await speech.speech_to_text(audio_data)
+            if result["status"] == "success":
+                text = result["text"]
+                doc_id = firestore.save_training_data(user_id, text, "general")
+                await update.message.reply_text(f"Đã lưu giọng nói: {text} (ID: {doc_id})")
+            else:
+                await update.message.reply_text(f"Lỗi: {result['message']}")
     except Exception as e:
         logger.error(f"Error in handle_media: {str(e)}")
         await update.message.reply_text(f"Lỗi: {str(e)}")
