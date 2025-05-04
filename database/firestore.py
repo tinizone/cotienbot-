@@ -39,9 +39,19 @@ class FirestoreClient:
             "timestamp": self.SERVER_TIMESTAMP
         })
 
-    def save_training_data(self, user_id: str, info: str, data_type: str) -> str:
+    def save_training_data(self, user_id: str, info: str, data_type: str = None) -> str:
         embedding = self._model.encode(info).tolist()
         doc_ref = self.client.collection("users").document(user_id).collection("training_data").document()
+        # Phân loại thông tin
+        if data_type is None:
+            if info.lower().startswith("tôi tên"):
+                data_type = "name"
+            elif "sinh năm" in info.lower():
+                data_type = "age"
+            elif "nhà ở" in info.lower():
+                data_type = "address"
+            else:
+                data_type = "general"
         doc_ref.set({
             "info": info,
             "type": data_type,
@@ -56,19 +66,56 @@ class FirestoreClient:
         results = []
         for doc in docs:
             data = doc.to_dict()
-            # UPDATE: So sánh văn bản trực tiếp trước
             if data["info"].lower() == query.lower():
                 results.append({"id": doc.id, "info": data["info"], "type": data["type"], "similarity": 1.0})
                 continue
-            # So sánh embedding
             data_embedding = np.array(data["embedding"])
             similarity = np.dot(query_embedding, data_embedding) / (
                 np.linalg.norm(query_embedding) * np.linalg.norm(data_embedding)
             )
-            # UPDATE: Giảm ngưỡng similarity từ 0.5 xuống 0.3
-            if similarity > 0.3:
+            if similarity > 0.7:  # Tăng ngưỡng từ 0.3 lên 0.7
                 results.append({"id": doc.id, "info": data["info"], "type": data["type"], "similarity": similarity})
         return sorted(results, key=lambda x: x["similarity"], reverse=True)
+
+    def get_similar_chat(self, user_id: str, query: str) -> Dict | None:
+        query_embedding = self._model.encode(query).tolist()
+        docs = self.client.collection("chat_history")\
+            .where("user_id", "==", user_id)\
+            .order_by("timestamp", direction=firestore.Query.DESCENDING)\
+            .limit(10).stream()  # Giới hạn 10 tin nhắn gần nhất
+        for doc in docs:
+            data = doc.to_dict()
+            message_embedding = self._model.encode(data["message"]).tolist()
+            similarity = np.dot(query_embedding, message_embedding) / (
+                np.linalg.norm(query_embedding) * np.linalg.norm(message_embedding)
+            )
+            if similarity > 0.9:  # Ngưỡng cao để đảm bảo câu hỏi gần giống
+                return {
+                    "message": data["message"],
+                    "response": data["response"],
+                    "timestamp": data["timestamp"],
+                    "similarity": similarity
+                }
+        return None
+
+    def get_chat_history(self, user_id: str, limit: int = 5) -> List[Dict]:
+        docs = self.client.collection("chat_history")\
+            .where("user_id", "==", user_id)\
+            .order_by("timestamp", direction=firestore.Query.DESCENDING)\
+            .limit(limit).stream()
+        return [doc.to_dict() for doc in docs]
+
+    def get_training_data_count(self, user_id: str) -> int:
+        docs = self.client.collection("users").document(user_id).collection("training_data").stream()
+        return sum(1 for _ in docs)
+
+    def get_latest_training_data_timestamp(self, user_id: str) -> float | None:
+        docs = self.client.collection("users").document(user_id).collection("training_data")\
+            .order_by("created_at", direction=firestore.Query.DESCENDING)\
+            .limit(1).stream()
+        for doc in docs:
+            return doc.to_dict()["created_at"].timestamp()
+        return None
 
     def set_admin(self, user_id: str, name: str = "Admin"):
         self.save_user(user_id, {
