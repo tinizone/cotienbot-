@@ -123,3 +123,22 @@ async def handle_media(update: Update, context: CallbackContext) -> None:
     except Exception as e:
         logger.error(f"Error in handle_media: {str(e)}")
         await update.message.reply_text(f"Lỗi: {str(e)}")
+async def create_course_command(update: Update, context: CallbackContext) -> None:
+    try:
+        if not context.args:
+            await update.message.reply_text("Vui lòng nhập: /createcourse <title> | <description>")
+            return
+        args = " ".join(context.args).split("|")
+        if len(args) != 2:
+            await update.message.reply_text("Cần đúng 2 phần: tiêu đề, mô tả.")
+            return
+        title, description = [arg.strip() for arg in args]
+        user_id = str(update.message.from_user.id)
+        course_manager = CourseManager()
+        course_manager.create_course(title, description, user_id)
+        await update.message.reply_text(f"Khóa học '{title}' đã được tạo!")
+    except ValueError as e:
+        await update.message.reply_text(f"Lỗi: {str(e)}")
+    except Exception as e:
+        logger.error(f"Error in create_course_command: {str(e)}")
+        await update.message.reply_text(f"Lỗi: {str(e)}")
