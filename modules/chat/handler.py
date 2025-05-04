@@ -6,26 +6,27 @@ from modules.learning.quiz import QuizManager
 from modules.media.speech import SpeechProcessor
 from modules.learning.course import CourseManager
 from database.firestore import FirestoreClient
+from google.cloud import firestore
 import logging
 from modules.learning.crawler import crawl_rss
+import re  # UPDATE: Thêm để phân tích thông tin đào tạo
 
 logger = logging.getLogger(__name__)
-firestore = FirestoreClient()
+firestore_client = FirestoreClient()
 quiz_manager = QuizManager()
-course_manager = CourseManager()  # Thêm import và khởi tạo CourseManager
+course_manager = CourseManager()
 
 async def start(update: Update, context: CallbackContext) -> None:
     user_id = str(update.message.from_user.id)
     welcome_message = f"Chào {update.message.from_user.first_name}!\nGõ /help để xem hướng dẫn."
     await update.message.reply_text(welcome_message)
-    firestore.save_user(user_id, {
+    firestore_client.save_user(user_id, {
         "name": update.message.from_user.first_name,
         "created_at": firestore.SERVER_TIMESTAMP
     })
 
 async def help_command(update: Update, context: CallbackContext) -> None:
     try:
-        # UPDATE: Cập nhật help_message với các lệnh mới
         help_message = "Hướng dẫn sử dụng CotienBot:\n" \
                        "- /start: Bắt đầu.\n" \
                        "- /help: Xem hướng dẫn.\n" \
@@ -52,7 +53,7 @@ async def train_command(update: Update, context: CallbackContext) -> None:
         user_id = str(update.message.from_user.id)
         info = " ".join(context.args)
         data_type = "name" if info.lower().startswith("tôi tên") else "general"
-        doc_id = firestore.save_training_data(user_id, info, data_type)
+        doc_id = firestore_client.save_training_data(user_id, info, data_type)
         await update.message.reply_text(f"Đã lưu thông tin: {info} (ID: {doc_id})")
     except Exception as e:
         logger.error(f"Error in train_command: {str(e)}")
@@ -92,20 +93,42 @@ async def take_quiz_command(update: Update, context: CallbackContext) -> None:
 async def handle_message(update: Update, context: CallbackContext) -> None:
     try:
         user_id = str(update.message.from_user.id)
-        user_message = update.message.text
+        user_message = update.message.text.lower()  # Chuyển về chữ thường để dễ xử lý
 
         # Tìm trong dữ liệu đào tạo
-        training_data = firestore.get_training_data(user_id, user_message)
+        training_data = firestore_client.get_training_data(user_id, user_message)
         if training_data:
-            response = training_data[0]["info"]
+            info = training_data[0]["info"]
+            # UPDATE: Phân tích thông tin đào tạo để trả lời đúng câu hỏi
+            if "tên gì không" in user_message or "tên gì" in user_message:
+                # Trích xuất tên từ thông tin đào tạo
+                name_match = re.search(r"(?:tôi|tói) tên (\w+)", info, re.IGNORECASE)
+                if name_match:
+                    name = name_match.group(1)
+                    response = f"Tói biết, bạn tên {name.capitalize()}!"
+                else:
+                    response = "Tói chưa biết tên của bạn, bạn có thể dùng /train để cung cấp thêm thông tin nhé!"
+            elif "bao nhiêu tuổi không" in user_message or "mấy tuổi" in user_message:
+                # Trích xuất năm sinh và tính tuổi
+                year_match = re.search(r"(?:tôi|tói) sinh năm (\d{4})", info, re.IGNORECASE)
+                if year_match:
+                    birth_year = int(year_match.group(1))
+                    current_year = 2025  # Năm hiện tại
+                    age = current_year - birth_year
+                    response = f"Tói biết, bạn {age} tuổi!"
+                else:
+                    response = "Tói chưa biết tuổi của bạn, bạn có thể dùng /train để cung cấp thêm thông tin nhé!"
+            else:
+                # Nếu không phải câu hỏi về tên hoặc tuổi, trả lại thông tin đào tạo nguyên văn
+                response = info
             await update.message.reply_text(response)
-            firestore.save_chat(user_id, user_message, response)
+            firestore_client.save_chat(user_id, user_message, response)
             return
 
-        # Nếu không tìm thấy, gọi Gemini
-        response = get_gemini_response(user_message)
+        # UPDATE: Tùy chỉnh câu trả lời mặc định khi không tìm thấy thông tin
+        response = "Tói chưa biết thông tin đó, bạn có thể dùng /train để cung cấp thêm thông tin nhé!"
         await update.message.reply_text(response)
-        firestore.save_chat(user_id, user_message, response)
+        firestore_client.save_chat(user_id, user_message, response)
     except Exception as e:
         logger.error(f"Error in handle_message: {str(e)}")
         await update.message.reply_text(f"Lỗi: {str(e)}")
@@ -125,7 +148,7 @@ async def handle_media(update: Update, context: CallbackContext) -> None:
             result = await speech.speech_to_text(audio_data)
             if result["status"] == "success":
                 text = result["text"]
-                doc_id = firestore.save_training_data(user_id, text, "general")
+                doc_id = firestore_client.save_training_data(user_id, text, "general")
                 await update.message.reply_text(f"Đã lưu giọng nói: {text} (ID: {doc_id})")
             else:
                 await update.message.reply_text(f"Lỗi: {result['message']}")
@@ -167,7 +190,6 @@ async def crawl_command(update: Update, context: CallbackContext) -> None:
         logger.error(f"Error in crawl_command: {str(e)}")
         await update.message.reply_text(f"Lỗi: {str(e)}")
 
-# NEW: Thêm lệnh /listcourses để liệt kê khóa học
 async def list_courses_command(update: Update, context: CallbackContext) -> None:
     try:
         docs = course_manager.db.client.collection("courses").stream()
@@ -181,11 +203,10 @@ async def list_courses_command(update: Update, context: CallbackContext) -> None
         logger.error(f"Error in list_courses_command: {str(e)}")
         await update.message.reply_text(f"Lỗi: {str(e)}")
 
-# NEW: Thêm lệnh /setadmin để đặt user làm admin (chỉ admin được gọi)
 async def set_admin_command(update: Update, context: CallbackContext) -> None:
     try:
         user_id = str(update.message.from_user.id)
-        current_user = firestore.get_user(user_id)
+        current_user = firestore_client.get_user(user_id)
         if not current_user or current_user.get("role") != "admin":
             await update.message.reply_text("Chỉ admin mới có quyền đặt admin khác!")
             return
@@ -194,13 +215,12 @@ async def set_admin_command(update: Update, context: CallbackContext) -> None:
             return
         target_user_id = context.args[0]
         name = context.args[1] if len(context.args) == 2 else "Admin"
-        firestore.set_admin(target_user_id, name)
+        firestore_client.set_admin(target_user_id, name)
         await update.message.reply_text(f"Đã đặt {target_user_id} làm admin với tên {name}")
     except Exception as e:
         logger.error(f"Error in set_admin_command: {str(e)}")
         await update.message.reply_text(f"Lỗi: {str(e)}")
 
-# NEW: Thêm lệnh /getid để lấy user_id của người dùng
 async def get_id_command(update: Update, context: CallbackContext) -> None:
     try:
         user_id = str(update.message.from_user.id)
