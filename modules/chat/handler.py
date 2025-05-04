@@ -6,6 +6,7 @@ from modules.learning.quiz import QuizManager
 from modules.media.speech import SpeechProcessor
 from database.firestore import FirestoreClient
 import logging
+from modules.learning.crawler import crawl_rss
 
 logger = logging.getLogger(__name__)
 firestore = FirestoreClient()
@@ -141,4 +142,20 @@ async def create_course_command(update: Update, context: CallbackContext) -> Non
         await update.message.reply_text(f"Lỗi: {str(e)}")
     except Exception as e:
         logger.error(f"Error in create_course_command: {str(e)}")
+        await update.message.reply_text(f"Lỗi: {str(e)}")
+# Thêm vào /modules/chat/handler.py
+
+async def crawl_command(update: Update, context: CallbackContext) -> None:
+    try:
+        if not context.args:
+            await update.message.reply_text("Vui lòng cung cấp URL: /crawl <url>")
+            return
+        url = context.args[0]
+        result = crawl_rss(url)
+        if "error" in result:
+            await update.message.reply_text(f"Lỗi: {result['error']}")
+        else:
+            await update.message.reply_text(f"Đã crawl {len(result)} bài từ {url}")
+    except Exception as e:
+        logger.error(f"Error in crawl_command: {str(e)}")
         await update.message.reply_text(f"Lỗi: {str(e)}")
