@@ -1,10 +1,10 @@
-# (/modules/learning/quiz.py)
+# File: /modules/learning/quiz.py
 from database.firestore import FirestoreClient
 from google.cloud import firestore
 from typing import Dict, List
-import logging
+import logging  # Đã có, giữ nguyên
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)  # Đã có, giữ nguyên
 
 class QuizManager:
     def __init__(self):
@@ -27,7 +27,7 @@ class QuizManager:
         }
         doc_ref = self.collection.document()
         doc_ref.set(quiz_data)
-        logger.info(f"Quiz created by {user_id}: {question}")
+        logger.info(f"Quiz created by {user_id}: {question}")  # Đã có, giữ nguyên
         return doc_ref.id
 
     def get_quiz(self, quiz_id: str) -> Dict:
@@ -41,7 +41,7 @@ class QuizManager:
         """Liệt kê tất cả quiz."""
         docs = self.collection.stream()
         quizzes = [{"id": doc.id, **doc.to_dict()} for doc in docs]
-        logger.info(f"Retrieved {len(quizzes)} quizzes for user {user_id}")
+        logger.info(f"Retrieved {len(quizzes)} quizzes for user {user_id}")  # Đã có, giữ nguyên
         return quizzes
 
     def check_answer(self, quiz_id: str, answer: str) -> Dict:
