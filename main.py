@@ -38,6 +38,9 @@ async def webhook(request: Request):
         return {"status": "ok"}
     except Exception as e:
         logger.error(f"Error processing webhook: {str(e)}")
+        # Sử dụng update.effective_message để đảm bảo an toàn khi reply
+        if update and hasattr(update, "effective_message") and update.effective_message:
+            await update.effective_message.reply_text(f"Lỗi: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/")
@@ -56,10 +59,10 @@ async def startup_event():
     except Exception as e:
         logger.error(f"Failed to set webhook: {e}")
 
-    # UPDATE: Thay đổi admin_user_id từ 8093177019 thành 7580364404
+    # Đặt admin
     db = FirestoreClient()
-    admin_user_id = "7580364404"  # Cập nhật user_id của bạn
-    db.set_admin(admin_user_id, "Admin")  # Đặt bạn làm admin
+    admin_user_id = "7580364404"
+    db.set_admin(admin_user_id, "Admin")
     logger.info(f"Đã đặt {admin_user_id} làm admin khi khởi động.")
 
 @app.on_event("shutdown")
