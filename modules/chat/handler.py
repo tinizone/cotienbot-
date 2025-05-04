@@ -2,18 +2,19 @@
 from telegram import Update
 from telegram.ext import CallbackContext
 from modules.chat.gemini import get_gemini_response
+from modules.learning.quiz import QuizManager
+from modules.media.speech import SpeechProcessor
 from database.firestore import FirestoreClient
 import logging
-from modules.media.speech import SpeechProcessor
 
 logger = logging.getLogger(__name__)
 firestore = FirestoreClient()
+quiz_manager = QuizManager()
 
 async def start(update: Update, context: CallbackContext) -> None:
     user_id = str(update.message.from_user.id)
     welcome_message = f"Chào {update.message.from_user.first_name}!\nGõ /help để xem hướng dẫn."
     await update.message.reply_text(welcome_message)
-    # Lưu thông tin người dùng
     firestore.save_user(user_id, {
         "name": update.message.from_user.first_name,
         "created_at": firestore.SERVER_TIMESTAMP
@@ -25,8 +26,10 @@ async def help_command(update: Update, context: CallbackContext) -> None:
                        "- /start: Bắt đầu.\n" \
                        "- /help: Xem hướng dẫn.\n" \
                        "- /train <info>: Lưu thông tin (VD: Tôi tên Vinh).\n" \
+                       "- /createquiz <question> | <correct> | <wrong1> | <wrong2> | <wrong3>: Tạo quiz (admin).\n" \
+                       "- /takequiz <quiz_id> <answer>: Trả lời quiz.\n" \
                        "- Gửi tin nhắn để trò chuyện.\n" \
-                       "- Gửi ảnh, video, hoặc âm thanh để xử lý."
+                       "- Gửi giọng nói để lưu thông tin."
         await update.message.reply_text(help_message)
     except Exception as e:
         logger.error(f"Error in help_command: {str(e)}")
@@ -46,6 +49,37 @@ async def train_command(update: Update, context: CallbackContext) -> None:
         logger.error(f"Error in train_command: {str(e)}")
         await update.message.reply_text(f"Lỗi: {str(e)}")
 
+async def create_quiz_command(update: Update, context: CallbackContext) -> None:
+    try:
+        if not context.args:
+            await update.message.reply_text("Vui lòng nhập: /createquiz <question> | <correct> | <wrong1> | <wrong2> | <wrong3>")
+            return
+        args = " ".join(context.args).split("|")
+        if len(args) != 5:
+            await update.message.reply_text("Cần đúng 5 phần: câu hỏi, đáp án đúng, 3 đáp án sai.")
+            return
+        question, correct, *wrong_answers = [arg.strip() for arg in args]
+        user_id = str(update.message.from_user.id)
+        quiz_id = quiz_manager.create_quiz(user_id, question, correct, wrong_answers)
+        await update.message.reply_text(f"Quiz created! ID: {quiz_id}")
+    except ValueError as e:
+        await update.message.reply_text(f"Lỗi: {str(e)}")
+    except Exception as e:
+        logger.error(f"Error in create_quiz_command: {str(e)}")
+        await update.message.reply_text(f"Lỗi: {str(e)}")
+
+async def take_quiz_command(update: Update, context: CallbackContext) -> None:
+    try:
+        if len(context.args) < 2:
+            await update.message.reply_text("Vui lòng nhập: /takequiz <quiz_id> <answer>")
+            return
+        quiz_id, answer = context.args[0], " ".join(context.args[1:])
+        result = quiz_manager.check_answer(quiz_id, answer)
+        await update.message.reply_text(result["message"])
+    except Exception as e:
+        logger.error(f"Error in take_quiz_command: {str(e)}")
+        await update.message.reply_text(f"Lỗi: {str(e)}")
+
 async def handle_message(update: Update, context: CallbackContext) -> None:
     try:
         user_id = str(update.message.from_user.id)
@@ -54,7 +88,7 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
         # Tìm trong dữ liệu đào tạo
         training_data = firestore.get_training_data(user_id, user_message)
         if training_data:
-            response = training_data[0]["info"]  # Lấy kết quả tương đồng cao nhất
+            response = training_data[0]["info"]
             await update.message.reply_text(response)
             firestore.save_chat(user_id, user_message, response)
             return
@@ -66,16 +100,6 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
     except Exception as e:
         logger.error(f"Error in handle_message: {str(e)}")
         await update.message.reply_text(f"Lỗi: {str(e)}")
-
-async def handle_media(update: Update, context: CallbackContext) -> None:
-    try:
-        media_type = "photo" if update.message.photo else "video" if update.message.video else "audio"
-        await update.message.reply_text(f"Tôi đã nhận được {media_type} của bạn. Tính năng xử lý đang phát triển!")
-    except Exception as e:
-        logger.error(f"Error in handle_media: {str(e)}")
-        await update.message.reply_text(f"Lỗi: {str(e)}")
-
-# Thêm vào /modules/chat/handler.py
 
 async def handle_media(update: Update, context: CallbackContext) -> None:
     try:
