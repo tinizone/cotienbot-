@@ -8,17 +8,19 @@ from typing import List, Dict
 import numpy as np
 import logging
 
-logger = logging.getLogger(__name__)  # Thêm logging để debug
+logger = logging.getLogger(__name__)
 
 class FirestoreClient:
     _instance = None
-    _model = SentenceTransformer("all-MiniLM-L6-v2")  # Nhẹ, miễn phí
+    _model = SentenceTransformer("all-MiniLM-L6-v2")
 
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             credentials = json.loads(settings.firestore_credentials)
             cls._instance.client = firestore.Client.from_service_account_info(credentials)
+            # UPDATE: Thêm thuộc tính SERVER_TIMESTAMP
+            cls._instance.SERVER_TIMESTAMP = firestore.SERVER_TIMESTAMP
         return cls._instance
 
     def get_user(self, user_id: str):
@@ -41,7 +43,7 @@ class FirestoreClient:
 
     def save_training_data(self, user_id: str, info: str, data_type: str) -> str:
         """Lưu dữ liệu đào tạo với embedding."""
-        embedding = self._model.encode(info).tolist()  # Tạo embedding
+        embedding = self._model.encode(info).tolist()
         doc_ref = self.client.collection("users").document(user_id).collection("training_data").document()
         doc_ref.set({
             "info": info,
@@ -62,11 +64,10 @@ class FirestoreClient:
             similarity = np.dot(query_embedding, data_embedding) / (
                 np.linalg.norm(query_embedding) * np.linalg.norm(data_embedding)
             )
-            if similarity > 0.7:  # Ngưỡng tương đồng
+            if similarity > 0.7:
                 results.append({"id": doc.id, "info": data["info"], "type": data["type"], "similarity": similarity})
         return sorted(results, key=lambda x: x["similarity"], reverse=True)
 
-    # NEW: Thêm hàm set_admin để hỗ trợ đặt admin
     def set_admin(self, user_id: str, name: str = "Admin"):
         """Thêm hoặc cập nhật user thành admin."""
         self.save_user(user_id, {
