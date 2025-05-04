@@ -21,6 +21,7 @@ telegram_app.add_handler(CommandHandler("takequiz", take_quiz_command))
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 telegram_app.add_handler(MessageHandler(filters.PHOTO | filters.VIDEO | filters.AUDIO | filters.VOICE, handle_media))
 telegram_app.add_handler(CommandHandler("createcourse", create_course_command))
+telegram_app.add_handler(CommandHandler("crawl", crawl_command))
 
 @app.post("/webhook")
 async def webhook(request: Request):
