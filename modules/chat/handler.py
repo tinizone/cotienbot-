@@ -4,6 +4,7 @@ from telegram.ext import CallbackContext
 from modules.chat.gemini import get_gemini_response
 from modules.learning.quiz import QuizManager
 from modules.media.speech import SpeechProcessor
+from modules.learning.course import CourseManager
 from database.firestore import FirestoreClient
 import logging
 from modules.learning.crawler import crawl_rss
@@ -11,6 +12,7 @@ from modules.learning.crawler import crawl_rss
 logger = logging.getLogger(__name__)
 firestore = FirestoreClient()
 quiz_manager = QuizManager()
+course_manager = CourseManager()  # Thêm import và khởi tạo CourseManager
 
 async def start(update: Update, context: CallbackContext) -> None:
     user_id = str(update.message.from_user.id)
@@ -23,12 +25,18 @@ async def start(update: Update, context: CallbackContext) -> None:
 
 async def help_command(update: Update, context: CallbackContext) -> None:
     try:
+        # UPDATE: Cập nhật help_message với các lệnh mới
         help_message = "Hướng dẫn sử dụng CotienBot:\n" \
                        "- /start: Bắt đầu.\n" \
                        "- /help: Xem hướng dẫn.\n" \
                        "- /train <info>: Lưu thông tin (VD: Tôi tên Vinh).\n" \
                        "- /createquiz <question> | <correct> | <wrong1> | <wrong2> | <wrong3>: Tạo quiz (admin).\n" \
                        "- /takequiz <quiz_id> <answer>: Trả lời quiz.\n" \
+                       "- /createcourse <title> | <description>: Tạo khóa học (admin).\n" \
+                       "- /listcourses: Liệt kê khóa học.\n" \
+                       "- /setadmin <user_id> [name]: Đặt user làm admin (chỉ admin).\n" \
+                       "- /getid: Lấy user_id của bạn.\n" \
+                       "- /crawl <url>: Crawl RSS.\n" \
                        "- Gửi tin nhắn để trò chuyện.\n" \
                        "- Gửi giọng nói để lưu thông tin."
         await update.message.reply_text(help_message)
@@ -124,6 +132,7 @@ async def handle_media(update: Update, context: CallbackContext) -> None:
     except Exception as e:
         logger.error(f"Error in handle_media: {str(e)}")
         await update.message.reply_text(f"Lỗi: {str(e)}")
+
 async def create_course_command(update: Update, context: CallbackContext) -> None:
     try:
         if not context.args:
@@ -135,7 +144,6 @@ async def create_course_command(update: Update, context: CallbackContext) -> Non
             return
         title, description = [arg.strip() for arg in args]
         user_id = str(update.message.from_user.id)
-        course_manager = CourseManager()
         course_manager.create_course(title, description, user_id)
         await update.message.reply_text(f"Khóa học '{title}' đã được tạo!")
     except ValueError as e:
@@ -143,7 +151,6 @@ async def create_course_command(update: Update, context: CallbackContext) -> Non
     except Exception as e:
         logger.error(f"Error in create_course_command: {str(e)}")
         await update.message.reply_text(f"Lỗi: {str(e)}")
-# Thêm vào /modules/chat/handler.py
 
 async def crawl_command(update: Update, context: CallbackContext) -> None:
     try:
@@ -158,4 +165,46 @@ async def crawl_command(update: Update, context: CallbackContext) -> None:
             await update.message.reply_text(f"Đã crawl {len(result)} bài từ {url}")
     except Exception as e:
         logger.error(f"Error in crawl_command: {str(e)}")
+        await update.message.reply_text(f"Lỗi: {str(e)}")
+
+# NEW: Thêm lệnh /listcourses để liệt kê khóa học
+async def list_courses_command(update: Update, context: CallbackContext) -> None:
+    try:
+        docs = course_manager.db.client.collection("courses").stream()
+        courses = [doc.to_dict() for doc in docs]
+        if not courses:
+            await update.message.reply_text("Chưa có khóa học nào!")
+            return
+        response = "Danh sách khóa học:\n" + "\n".join(f"- {c['title']} (Admin: {c['admin_id']})" for c in courses)
+        await update.message.reply_text(response)
+    except Exception as e:
+        logger.error(f"Error in list_courses_command: {str(e)}")
+        await update.message.reply_text(f"Lỗi: {str(e)}")
+
+# NEW: Thêm lệnh /setadmin để đặt user làm admin (chỉ admin được gọi)
+async def set_admin_command(update: Update, context: CallbackContext) -> None:
+    try:
+        user_id = str(update.message.from_user.id)
+        current_user = firestore.get_user(user_id)
+        if not current_user or current_user.get("role") != "admin":
+            await update.message.reply_text("Chỉ admin mới có quyền đặt admin khác!")
+            return
+        if len(context.args) < 1 or len(context.args) > 2:
+            await update.message.reply_text("Vui lòng nhập: /setadmin <user_id> [name]")
+            return
+        target_user_id = context.args[0]
+        name = context.args[1] if len(context.args) == 2 else "Admin"
+        firestore.set_admin(target_user_id, name)
+        await update.message.reply_text(f"Đã đặt {target_user_id} làm admin với tên {name}")
+    except Exception as e:
+        logger.error(f"Error in set_admin_command: {str(e)}")
+        await update.message.reply_text(f"Lỗi: {str(e)}")
+
+# NEW: Thêm lệnh /getid để lấy user_id của người dùng
+async def get_id_command(update: Update, context: CallbackContext) -> None:
+    try:
+        user_id = str(update.message.from_user.id)
+        await update.message.reply_text(f"User ID của bạn là: {user_id}")
+    except Exception as e:
+        logger.error(f"Error in get_id_command: {str(e)}")
         await update.message.reply_text(f"Lỗi: {str(e)}")
