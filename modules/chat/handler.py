@@ -1,30 +1,38 @@
-# /modules/chat/handler.py
+# UPDATE: /modules/chat/handler.py
 from telegram import Update
 from telegram.ext import CallbackContext
 from modules.chat.gemini import get_gemini_response
 from modules.learning.quiz import QuizManager
-from modules.media.speech import SpeechProcessor
 from modules.learning.course import CourseManager
 from database.firestore import FirestoreClient
 from google.cloud import firestore
 import logging
-from modules.learning.crawler import crawl_rss
+import html
+import traceback
 
 logger = logging.getLogger(__name__)
 firestore_client = FirestoreClient()
 quiz_manager = QuizManager()
 course_manager = CourseManager()
 
+class SpeechProcessor:
+    # Placeholder until implementation is provided
+    async def speech_to_text(self, audio_data: bytes) -> dict:
+        return {"status": "error", "message": "Speech processing not implemented"}
+
 async def start(update: Update, context: CallbackContext) -> None:
+    """Initialize user and save to Firestore."""
     user_id = str(update.message.from_user.id)
-    welcome_message = f"Chào {update.message.from_user.first_name}!\nGõ /help để xem hướng dẫn."
+    name = html.escape(update.message.from_user.first_name)  # Sanitize input
+    welcome_message = f"Chào {name}!\nGõ /help để xem hướng dẫn."
     await update.message.reply_text(welcome_message)
     firestore_client.save_user(user_id, {
-        "name": update.message.from_user.first_name,
+        "name": name,
         "created_at": firestore.SERVER_TIMESTAMP
     })
 
 async def help_command(update: Update, context: CallbackContext) -> None:
+    """Display help message with command instructions."""
     try:
         help_message = "Hướng dẫn sử dụng CotienBot:\n" \
                        "- /start: Bắt đầu.\n" \
@@ -42,29 +50,29 @@ async def help_command(update: Update, context: CallbackContext) -> None:
         await update.message.reply_text(help_message)
     except Exception as e:
         logger.error(f"Error in help_command: {str(e)}")
+        await update.message.reply_text("Lỗi khi hiển thị hướng dẫn. Vui lòng thử lại.")
 
 async def train_command(update: Update, context: CallbackContext) -> None:
+    """Save training data with duplicate check."""
     try:
         if not context.args:
             await update.message.reply_text("Vui lòng cung cấp thông tin: /train <info>")
             return
         user_id = str(update.message.from_user.id)
-        info = " ".join(context.args)
+        info = html.escape(" ".join(context.args))  # Sanitize input
         data_type = "name" if info.lower().startswith("tôi tên") else "general"
-
-        # Kiểm tra trùng lặp chi tiết hơn
         existing_data = firestore_client.get_training_data(user_id, info)
-        if existing_data and existing_data[0]["similarity"] > 0.95:
-            await update.message.reply_text(f"Thông tin '{info}' đã tồn tại (ID: {existing_data[0]['id']}), không lưu lại.")
+        if existing_data and existing_data[0]["similarity"] > 0.9:  # Lowered threshold
+            await update.message.reply_text(f"Thông tin '{info}' đã tồn tại (ID: {existing_data[0]['id']}).")
             return
-
         doc_id = firestore_client.save_training_data(user_id, info, data_type)
         await update.message.reply_text(f"Đã lưu thông tin: {info} (ID: {doc_id})")
     except Exception as e:
         logger.error(f"Error in train_command: {str(e)}")
-        await update.message.reply_text("Lỗi khi lưu thông tin. Vui lòng thử lại sau.")
+        await update.message.reply_text("Lỗi khi lưu thông tin. Vui lòng thử lại.")
 
 async def create_quiz_command(update: Update, context: CallbackContext) -> None:
+    """Create a new quiz (admin only)."""
     try:
         if not context.args:
             await update.message.reply_text("Vui lòng nhập: /createquiz <question> | <correct> | <wrong1> | <wrong2> | <wrong3>")
@@ -73,46 +81,44 @@ async def create_quiz_command(update: Update, context: CallbackContext) -> None:
         if len(args) != 5:
             await update.message.reply_text("Cần đúng 5 phần: câu hỏi, đáp án đúng, 3 đáp án sai.")
             return
-        question, correct, *wrong_answers = [arg.strip() for arg in args]
+        question, correct, *wrong_answers = [html.escape(arg.strip()) for arg in args]  # Sanitize inputs
         user_id = str(update.message.from_user.id)
         quiz_id = quiz_manager.create_quiz(user_id, question, correct, wrong_answers)
         await update.message.reply_text(f"Quiz created! ID: {quiz_id}")
     except ValueError as e:
-        logger.error(f"Error in create_quiz_command: {str(e)}")
+        await update.message.reply_text(str(e))
     except Exception as e:
         logger.error(f"Error in create_quiz_command: {str(e)}")
-        await update.message.reply_text("Lỗi khi tạo quiz. Vui lòng thử lại sau.")
+        await update.message.reply_text("Lỗi khi tạo quiz. Vui lòng thử lại.")
 
 async def take_quiz_command(update: Update, context: CallbackContext) -> None:
+    """Answer a quiz."""
     try:
         if len(context.args) < 2:
             await update.message.reply_text("Vui lòng nhập: /takequiz <quiz_id> <answer>")
             return
-        quiz_id, answer = context.args[0], " ".join(context.args[1:])
+        quiz_id, answer = context.args[0], html.escape(" ".join(context.args[1:]))  # Sanitize answer
         result = quiz_manager.check_answer(quiz_id, answer)
         await update.message.reply_text(result["message"])
     except Exception as e:
         logger.error(f"Error in take_quiz_command: {str(e)}")
-        await update.message.reply_text("Lỗi khi trả lời quiz. Vui lòng thử lại sau.")
+        await update.message.reply_text("Lỗi khi trả lời quiz. Vui lòng thử lại.")
 
 async def handle_message(update: Update, context: CallbackContext) -> None:
+    """Handle text messages with Gemini AI."""
     try:
-        # Kiểm tra update.message có tồn tại không
         if not update.message or not hasattr(update, "message"):
             logger.error("Update does not contain a message.")
             return
-
         user_id = str(update.message.from_user.id)
-        user_message = update.message.text.lower()
+        user_message = html.escape(update.message.text.lower())  # Sanitize input
         logger.info(f"Received message from {user_id}: {user_message}")
 
-        # Kiểm tra lịch sử trò chuyện để tái sử dụng câu trả lời
         similar_chat = firestore_client.get_similar_chat(user_id, user_message)
         latest_training_timestamp = firestore_client.get_latest_training_data_timestamp(user_id)
 
         if similar_chat:
             chat_timestamp = similar_chat["timestamp"].timestamp()
-            # Kiểm tra xem dữ liệu huấn luyện có thay đổi kể từ câu trả lời trước không
             if not latest_training_timestamp or chat_timestamp >= latest_training_timestamp:
                 response = similar_chat["response"]
                 await update.message.reply_text(response)
@@ -120,52 +126,41 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
                 firestore_client.save_chat(user_id, user_message, response)
                 return
 
-        # Lấy dữ liệu huấn luyện liên quan
         training_data = firestore_client.get_training_data(user_id, user_message)
         relevant_info = [data["info"] for data in training_data if data["similarity"] > 0.7] if training_data else []
-
-        # Lấy lịch sử trò chuyện gần đây (5 tin nhắn)
         chat_history = firestore_client.get_chat_history(user_id, limit=5)
         context_str = "\n".join([f"User: {chat['message']}\nBot: {chat['response']}" for chat in chat_history]) if chat_history else ""
 
-        # Tạo prompt cho Gemini
         prompt = f"""
-        Bạn là CotienBot, một trợ lý trò chuyện thông minh và thân thiện. Dựa trên thông tin huấn luyện và lịch sử trò chuyện dưới đây, trả lời câu hỏi của người dùng một cách tự nhiên, ngắn gọn và chính xác. Nếu không có thông tin liên quan, trả lời dựa trên kiến thức chung của bạn.
+Bạn là CotienBot, một trợ lý thông minh và thân thiện. Dựa trên thông tin huấn luyện và lịch sử trò chuyện, trả lời câu hỏi một cách ngắn gọn, tự nhiên và chính xác bằng tiếng Việt.
 
-        **Thông tin huấn luyện**:
-        {relevant_info if relevant_info else "Không có thông tin huấn luyện liên quan."}
+**Thông tin huấn luyện**: {relevant_info if relevant_info else "Không có."}
+**Lịch sử trò chuyện**: {context_str if context_str else "Không có."}
+**Câu hỏi**: {user_message}
 
-        **Lịch sử trò chuyện**:
-        {context_str if context_str else "Không có lịch sử trò chuyện."}
-
-        **Câu hỏi người dùng**: {user_message}
-
-        **Hướng dẫn**:
-        - Trả lời bằng tiếng Việt, giọng điệu thân thiện, tự nhiên như một người bạn.
-        - Nếu thông tin huấn luyện khớp chính xác, sử dụng nó nhưng diễn đạt lại để tránh lặp lại nguyên văn.
-        - Nếu không chắc chắn, trả lời chung chung hoặc đề xuất người dùng cung cấp thêm thông tin.
-        """
-
-        # Gọi Gemini và thêm tag [Gemini]
-        response = await get_gemini_response(prompt)
+Hướng dẫn:
+- Trả lời như một người bạn, tránh lặp lại nguyên văn thông tin huấn luyện.
+- Nếu không chắc chắn, trả lời chung chung hoặc đề xuất thêm thông tin.
+"""
+        response = get_gemini_response(prompt)
         if not isinstance(response, str):
-            logger.error(f"Gemini response is not a string: {response}")
-            response = "Lỗi: Không nhận được phản hồi hợp lệ từ Gemini."
+            logger.error(f"Invalid Gemini response: {response}")
+            response = "Lỗi: Không nhận được phản hồi từ Gemini."
         tagged_response = f"[Gemini] {response}"
         await update.message.reply_text(tagged_response)
-        logger.info(f"Sent Gemini response to {user_id}: {tagged_response}")
         firestore_client.save_chat(user_id, user_message, tagged_response)
     except Exception as e:
-        logger.error(f"Error in handle_message: {str(e)}")
-        # Không gửi lỗi cho người dùng để tránh retry loop
+        logger.error(f"Error in handle_message: {str(e)}\n{traceback.format_exc()}")
+        # Suppress error to avoid retry loop, but log stack trace
 
 async def handle_media(update: Update, context: CallbackContext) -> None:
+    """Handle media messages (voice, photo, video)."""
     try:
         user_id = str(update.message.from_user.id)
         if update.message.photo:
-            await update.message.reply_text("Tính năng xử lý ảnh đang phát triển!")
+            await update.message.reply_text("Tính năng xử lý ảnh sẽ sớm ra mắt!")
         elif update.message.video:
-            await update.message.reply_text("Tính năng xử lý video đang phát triển!")
+            await update.message.reply_text("Tính năng xử lý video sẽ sớm ra mắt!")
         elif update.message.voice:
             voice = update.message.voice
             file = await voice.get_file()
@@ -173,16 +168,17 @@ async def handle_media(update: Update, context: CallbackContext) -> None:
             speech = SpeechProcessor()
             result = await speech.speech_to_text(audio_data)
             if result["status"] == "success":
-                text = result["text"]
+                text = html.escape(result["text"])  # Sanitize text
                 doc_id = firestore_client.save_training_data(user_id, text, "general")
                 await update.message.reply_text(f"Đã lưu giọng nói: {text} (ID: {doc_id})")
             else:
                 await update.message.reply_text(f"Lỗi: {result['message']}")
     except Exception as e:
         logger.error(f"Error in handle_media: {str(e)}")
-        await update.message.reply_text("Lỗi khi xử lý media. Vui lòng thử lại sau.")
+        await update.message.reply_text("Lỗi khi xử lý media. Vui lòng thử lại.")
 
 async def create_course_command(update: Update, context: CallbackContext) -> None:
+    """Create a new course (admin only)."""
     try:
         if not context.args:
             await update.message.reply_text("Vui lòng nhập: /createcourse <title> | <description>")
@@ -191,22 +187,23 @@ async def create_course_command(update: Update, context: CallbackContext) -> Non
         if len(args) != 2:
             await update.message.reply_text("Cần đúng 2 phần: tiêu đề, mô tả.")
             return
-        title, description = [arg.strip() for arg in args]
+        title, description = [html.escape(arg.strip()) for arg in args]  # Sanitize inputs
         user_id = str(update.message.from_user.id)
         course_manager.create_course(title, description, user_id)
         await update.message.reply_text(f"Khóa học '{title}' đã được tạo!")
     except ValueError as e:
-        logger.error(f"Error in create_course_command: {str(e)}")
+        await update.message.reply_text(str(e))
     except Exception as e:
         logger.error(f"Error in create_course_command: {str(e)}")
-        await update.message.reply_text("Lỗi khi tạo khóa học. Vui lòng thử lại sau.")
+        await update.message.reply_text("Lỗi khi tạo khóa học. Vui lòng thử lại.")
 
 async def crawl_command(update: Update, context: CallbackContext) -> None:
+    """Crawl an RSS feed."""
     try:
         if not context.args:
             await update.message.reply_text("Vui lòng cung cấp URL: /crawl <url>")
             return
-        url = context.args[0]
+        url = html.escape(context.args[0])  # Sanitize URL
         result = crawl_rss(url)
         if "error" in result:
             await update.message.reply_text(f"Lỗi: {result['error']}")
@@ -214,9 +211,10 @@ async def crawl_command(update: Update, context: CallbackContext) -> None:
             await update.message.reply_text(f"Đã crawl {len(result)} bài từ {url}")
     except Exception as e:
         logger.error(f"Error in crawl_command: {str(e)}")
-        await update.message.reply_text("Lỗi khi crawl. Vui lòng thử lại sau.")
+        await update.message.reply_text("Lỗi khi crawl. Vui lòng thử lại.")
 
 async def list_courses_command(update: Update, context: CallbackContext) -> None:
+    """List all courses."""
     try:
         docs = course_manager.db.client.collection("courses").stream()
         courses = [doc.to_dict() for doc in docs]
@@ -227,9 +225,10 @@ async def list_courses_command(update: Update, context: CallbackContext) -> None
         await update.message.reply_text(response)
     except Exception as e:
         logger.error(f"Error in list_courses_command: {str(e)}")
-        await update.message.reply_text("Lỗi khi liệt kê khóa học. Vui lòng thử lại sau.")
+        await update.message.reply_text("Lỗi khi liệt kê khóa học. Vui lòng thử lại.")
 
 async def set_admin_command(update: Update, context: CallbackContext) -> None:
+    """Grant admin privileges to a user (admin only)."""
     try:
         user_id = str(update.message.from_user.id)
         current_user = firestore_client.get_user(user_id)
@@ -239,18 +238,22 @@ async def set_admin_command(update: Update, context: CallbackContext) -> None:
         if len(context.args) < 1 or len(context.args) > 2:
             await update.message.reply_text("Vui lòng nhập: /setadmin <user_id> [name]")
             return
-        target_user_id = context.args[0]
-        name = context.args[1] if len(context.args) == 2 else "Admin"
+        target_user_id = html.escape(context.args[0])  # Sanitize user_id
+        name = html.escape(context.args[1]) if len(context.args) == 2 else "Admin"  # Sanitize name
+        if not firestore_client.get_user(target_user_id):
+            await update.message.reply_text(f"User {target_user_id} không tồn tại!")
+            return
         firestore_client.set_admin(target_user_id, name)
         await update.message.reply_text(f"Đã đặt {target_user_id} làm admin với tên {name}")
     except Exception as e:
         logger.error(f"Error in set_admin_command: {str(e)}")
-        await update.message.reply_text("Lỗi khi đặt admin. Vui lòng thử lại sau.")
+        await update.message.reply_text("Lỗi khi đặt admin. Vui lòng thử lại.")
 
 async def get_id_command(update: Update, context: CallbackContext) -> None:
+    """Return the user's Telegram ID."""
     try:
         user_id = str(update.message.from_user.id)
         await update.message.reply_text(f"User ID của bạn là: {user_id}")
     except Exception as e:
         logger.error(f"Error in get_id_command: {str(e)}")
-        await update.message.reply_text("Lỗi khi lấy ID. Vui lòng thử lại sau.")
+        await update.message.reply_text("Lỗi khi lấy ID. Vui lòng thử lại.")
