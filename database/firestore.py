@@ -6,6 +6,9 @@ import json
 from sentence_transformers import SentenceTransformer
 from typing import List, Dict
 import numpy as np
+import logging
+
+logger = logging.getLogger(__name__)  # Thêm logging để debug
 
 class FirestoreClient:
     _instance = None
@@ -62,3 +65,13 @@ class FirestoreClient:
             if similarity > 0.7:  # Ngưỡng tương đồng
                 results.append({"id": doc.id, "info": data["info"], "type": data["type"], "similarity": similarity})
         return sorted(results, key=lambda x: x["similarity"], reverse=True)
+
+    # NEW: Thêm hàm set_admin để hỗ trợ đặt admin
+    def set_admin(self, user_id: str, name: str = "Admin"):
+        """Thêm hoặc cập nhật user thành admin."""
+        self.save_user(user_id, {
+            "role": "admin",
+            "name": name,
+            "created_at": firestore.SERVER_TIMESTAMP
+        })
+        logger.info(f"User {user_id} set as admin with name {name}")
