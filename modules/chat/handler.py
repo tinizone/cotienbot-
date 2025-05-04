@@ -9,7 +9,7 @@ from database.firestore import FirestoreClient
 from google.cloud import firestore
 import logging
 from modules.learning.crawler import crawl_rss
-import re  # UPDATE: Thêm để phân tích thông tin đào tạo
+import re
 
 logger = logging.getLogger(__name__)
 firestore_client = FirestoreClient()
@@ -53,6 +53,12 @@ async def train_command(update: Update, context: CallbackContext) -> None:
         user_id = str(update.message.from_user.id)
         info = " ".join(context.args)
         data_type = "name" if info.lower().startswith("tôi tên") else "general"
+
+        existing_data = firestore_client.get_training_data(user_id, info)
+        if existing_data:
+            await update.message.reply_text(f"Thông tin '{info}' đã tồn tại (ID: {existing_data[0]['id']}), không lưu lại.")
+            return
+
         doc_id = firestore_client.save_training_data(user_id, info, data_type)
         await update.message.reply_text(f"Đã lưu thông tin: {info} (ID: {doc_id})")
     except Exception as e:
@@ -93,15 +99,26 @@ async def take_quiz_command(update: Update, context: CallbackContext) -> None:
 async def handle_message(update: Update, context: CallbackContext) -> None:
     try:
         user_id = str(update.message.from_user.id)
-        user_message = update.message.text.lower()  # Chuyển về chữ thường để dễ xử lý
+        user_message = update.message.text.lower()
+        # UPDATE: Thêm log để kiểm tra tin nhắn nhận được
+        logger.info(f"Received message from {user_id}: {user_message}")
+
+        # UPDATE: Xử lý câu chào
+        if user_message in ["hi", "hello", "chào"]:
+            response = f"Chào bạn! Mình là CotienBot. Gõ /help để xem hướng dẫn nhé!"
+            await update.message.reply_text(response)
+            logger.info(f"Sent response to {user_id}: {response}")
+            firestore_client.save_chat(user_id, user_message, response)
+            return
 
         # Tìm trong dữ liệu đào tạo
         training_data = firestore_client.get_training_data(user_id, user_message)
         if training_data:
             info = training_data[0]["info"]
-            # UPDATE: Phân tích thông tin đào tạo để trả lời đúng câu hỏi
-            if "tên gì không" in user_message or "tên gì" in user_message:
-                # Trích xuất tên từ thông tin đào tạo
+            # UPDATE: Trả lời trực tiếp nếu câu hỏi khớp chính xác với câu đào tạo
+            if info.lower() == user_message:
+                response = f"Đúng rồi, mình đã được đào tạo: {info}!"
+            elif "tên gì không" in user_message or "tên gì" in user_message:
                 name_match = re.search(r"(?:tôi|tói) tên (\w+)", info, re.IGNORECASE)
                 if name_match:
                     name = name_match.group(1)
@@ -109,25 +126,25 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
                 else:
                     response = "Tói chưa biết tên của bạn, bạn có thể dùng /train để cung cấp thêm thông tin nhé!"
             elif "bao nhiêu tuổi không" in user_message or "mấy tuổi" in user_message:
-                # Trích xuất năm sinh và tính tuổi
                 year_match = re.search(r"(?:tôi|tói) sinh năm (\d{4})", info, re.IGNORECASE)
                 if year_match:
                     birth_year = int(year_match.group(1))
-                    current_year = 2025  # Năm hiện tại
+                    current_year = 2025
                     age = current_year - birth_year
                     response = f"Tói biết, bạn {age} tuổi!"
                 else:
                     response = "Tói chưa biết tuổi của bạn, bạn có thể dùng /train để cung cấp thêm thông tin nhé!"
             else:
-                # Nếu không phải câu hỏi về tên hoặc tuổi, trả lại thông tin đào tạo nguyên văn
                 response = info
             await update.message.reply_text(response)
+            logger.info(f"Sent response to {user_id}: {response}")
             firestore_client.save_chat(user_id, user_message, response)
             return
 
-        # UPDATE: Tùy chỉnh câu trả lời mặc định khi không tìm thấy thông tin
-        response = "Tói chưa biết thông tin đó, bạn có thể dùng /train để cung cấp thêm thông tin nhé!"
+        # UPDATE: Gọi Gemini làm fallback nếu không tìm thấy dữ liệu đào tạo
+        response = await get_gemini_response(user_message)
         await update.message.reply_text(response)
+        logger.info(f"Sent Gemini response to {user_id}: {response}")
         firestore_client.save_chat(user_id, user_message, response)
     except Exception as e:
         logger.error(f"Error in handle_message: {str(e)}")
