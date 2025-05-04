@@ -1,4 +1,4 @@
-# File: /database/firestore.py
+
 from google.cloud import firestore
 from google.cloud.firestore_v1 import Client
 from config.settings import settings
@@ -38,7 +38,7 @@ class FirestoreClient:
             "response": response,
             "timestamp": self.SERVER_TIMESTAMP
         })
-
+# /database/firestore.py
     def save_training_data(self, user_id: str, info: str, data_type: str = None) -> str:
         embedding = self._model.encode(info).tolist()
         doc_ref = self.client.collection("users").document(user_id).collection("training_data").document()
@@ -66,30 +66,27 @@ class FirestoreClient:
         results = []
         for doc in docs:
             data = doc.to_dict()
-            if data["info"].lower() == query.lower():
-                results.append({"id": doc.id, "info": data["info"], "type": data["type"], "similarity": 1.0})
-                continue
             data_embedding = np.array(data["embedding"])
             similarity = np.dot(query_embedding, data_embedding) / (
                 np.linalg.norm(query_embedding) * np.linalg.norm(data_embedding)
             )
-            if similarity > 0.7:  # Tăng ngưỡng từ 0.3 lên 0.7
+            if similarity > 0.7:
                 results.append({"id": doc.id, "info": data["info"], "type": data["type"], "similarity": similarity})
-        return sorted(results, key=lambda x: x["similarity"], reverse=True)
+        return sorted(results, key=lambda x: x["similarity"], reverse=True) if results else []
 
     def get_similar_chat(self, user_id: str, query: str) -> Dict | None:
         query_embedding = self._model.encode(query).tolist()
         docs = self.client.collection("chat_history")\
             .where("user_id", "==", user_id)\
             .order_by("timestamp", direction=firestore.Query.DESCENDING)\
-            .limit(10).stream()  # Giới hạn 10 tin nhắn gần nhất
+            .limit(10).stream()
         for doc in docs:
             data = doc.to_dict()
             message_embedding = self._model.encode(data["message"]).tolist()
             similarity = np.dot(query_embedding, message_embedding) / (
                 np.linalg.norm(query_embedding) * np.linalg.norm(message_embedding)
             )
-            if similarity > 0.9:  # Ngưỡng cao để đảm bảo câu hỏi gần giống
+            if similarity > 0.9:
                 return {
                     "message": data["message"],
                     "response": data["response"],
