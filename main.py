@@ -2,7 +2,7 @@
 from fastapi import FastAPI, Request, HTTPException
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
-from modules.chat.handler import start, handle_message, handle_media, help_command, train_command
+from modules.chat.handler import start, handle_message, handle_media, help_command, train_command, create_quiz_command, take_quiz_command
 from config.settings import settings
 import logging
 
@@ -16,8 +16,10 @@ telegram_app = Application.builder().token(settings.telegram_token).build()
 telegram_app.add_handler(CommandHandler("start", start))
 telegram_app.add_handler(CommandHandler("help", help_command))
 telegram_app.add_handler(CommandHandler("train", train_command))
+telegram_app.add_handler(CommandHandler("createquiz", create_quiz_command))
+telegram_app.add_handler(CommandHandler("takequiz", take_quiz_command))
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-telegram_app.add_handler(MessageHandler(filters.PHOTO | filters.VIDEO | filters.AUDIO, handle_media))
+telegram_app.add_handler(MessageHandler(filters.PHOTO | filters.VIDEO | filters.AUDIO | filters.VOICE, handle_media))
 
 @app.post("/webhook")
 async def webhook(request: Request):
