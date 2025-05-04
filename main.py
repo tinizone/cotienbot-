@@ -11,7 +11,8 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
-telegram_app = Application.builder().token(settings.telegram_token).build()
+# Tăng timeout và tắt retry tự động
+telegram_app = Application.builder().token(settings.telegram_token).read_timeout(30).write_timeout(30).connection_retries(0).build()
 
 # Thêm các handler
 telegram_app.add_handler(CommandHandler("start", start))
@@ -38,10 +39,7 @@ async def webhook(request: Request):
         return {"status": "ok"}
     except Exception as e:
         logger.error(f"Error processing webhook: {str(e)}")
-        # Sử dụng update.effective_message để đảm bảo an toàn khi reply
-        if update and hasattr(update, "effective_message") and update.effective_message:
-            await update.effective_message.reply_text(f"Lỗi: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return {"status": "error", "message": str(e)}  # Trả về 200 OK để tránh retry
 
 @app.get("/")
 async def root():
