@@ -1,4 +1,4 @@
-# File: /modules/chat/handler.py
+# /modules/chat/handler.py
 from telegram import Update
 from telegram.ext import CallbackContext
 from modules.chat.gemini import get_gemini_response
@@ -9,7 +9,6 @@ from database.firestore import FirestoreClient
 from google.cloud import firestore
 import logging
 from modules.learning.crawler import crawl_rss
-import re
 
 logger = logging.getLogger(__name__)
 firestore_client = FirestoreClient()
@@ -102,56 +101,52 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
         user_message = update.message.text.lower()
         logger.info(f"Received message from {user_id}: {user_message}")
 
-        if user_message in ["hi", "hello", "chào"]:
-            response = f"Chào bạn! Mình là CotienBot. Gõ /help để xem hướng dẫn nhé!"
-            await update.message.reply_text(response)
-            logger.info(f"Sent response to {user_id}: {response}")
-            firestore_client.save_chat(user_id, user_message, response)
-            return
+        # Kiểm tra lịch sử trò chuyện để tái sử dụng câu trả lời
+        similar_chat = firestore_client.get_similar_chat(user_id, user_message)
+        latest_training_timestamp = firestore_client.get_latest_training_data_timestamp(user_id)
 
+        if similar_chat:
+            chat_timestamp = similar_chat["timestamp"].timestamp()
+            # Kiểm tra xem dữ liệu huấn luyện có thay đổi kể từ câu trả lời trước không
+            if not latest_training_timestamp or chat_timestamp >= latest_training_timestamp:
+                response = similar_chat["response"]
+                await update.message.reply_text(response)
+                logger.info(f"Reused response for {user_id}: {response}")
+                firestore_client.save_chat(user_id, user_message, response)
+                return
+
+        # Lấy dữ liệu huấn luyện liên quan
         training_data = firestore_client.get_training_data(user_id, user_message)
-        if training_data:
-            info = training_data[0]["info"]
-            # UPDATE: Tránh lặp lại câu hỏi, trả lời ngắn gọn khi khớp chính xác
-            if info.lower() == user_message:
-                response = "Đúng rồi, mình đã được đào tạo về điều đó!"
-            elif "tên gì không" in user_message or "tên gì" in user_message:
-                name_match = re.search(r"(?:tôi|tói) tên (\w+)", info, re.IGNORECASE)
-                if name_match:
-                    name = name_match.group(1)
-                    response = f"Tói biết, bạn tên {name.capitalize()}!"
-                else:
-                    response = "Tói chưa biết tên của bạn, bạn có thể dùng /train để cung cấp thêm thông tin nhé!"
-            elif "bao nhiêu tuổi không" in user_message or "mấy tuổi" in user_message:
-                year_match = re.search(r"(?:tôi|tói) sinh năm (\d{4})", info, re.IGNORECASE)
-                if year_match:
-                    birth_year = int(year_match.group(1))
-                    current_year = 2025
-                    age = current_year - birth_year
-                    response = f"Tói biết, bạn {age} tuổi!"
-                else:
-                    response = "Tói chưa biết tuổi của bạn, bạn có thể dùng /train để cung cấp thêm thông tin nhé!"
-            elif "nhà tôi ở đâu" in user_message:
-                address_match = re.search(r"nhà ở (\w+)", info, re.IGNORECASE)
-                if address_match:
-                    address = address_match.group(1)
-                    response = f"Tói biết, nhà bạn ở {address}!"
-                else:
-                    response = "Tói chưa biết địa chỉ của bạn, bạn có thể dùng /train để cung cấp thêm thông tin nhé!"
-            elif "thời tiết hôm nay thế nào" in user_message:
-                response = "Tói chưa được đào tạo về thời tiết, để mình hỏi Gemini nhé!"  # Chuyển sang Gemini
-            else:
-                response = info  # Nếu không khớp điều kiện, trả lại nguyên văn
-            await update.message.reply_text(response)
-            logger.info(f"Sent response to {user_id}: {response}")
-            firestore_client.save_chat(user_id, user_message, response)
-            return
+        relevant_info = [data["info"] for data in training_data if data["similarity"] > 0.7]
 
-        # UPDATE: Đảm bảo gọi Gemini làm fallback
-        response = await get_gemini_response(user_message)
-        await update.message.reply_text(response)
-        logger.info(f"Sent Gemini response to {user_id}: {response}")
-        firestore_client.save_chat(user_id, user_message, response)
+        # Lấy lịch sử trò chuyện gần đây (5 tin nhắn)
+        chat_history = firestore_client.get_chat_history(user_id, limit=5)
+        context_str = "\n".join([f"User: {chat['message']}\nBot: {chat['response']}" for chat in chat_history])
+
+        # Tạo prompt cho Gemini
+        prompt = f"""
+        Bạn là CotienBot, một trợ lý trò chuyện thông minh và thân thiện. Dựa trên thông tin huấn luyện và lịch sử trò chuyện dưới đây, trả lời câu hỏi của người dùng một cách tự nhiên, ngắn gọn và chính xác. Nếu không có thông tin liên quan, trả lời dựa trên kiến thức chung của bạn.
+
+        **Thông tin huấn luyện**:
+        {relevant_info if relevant_info else "Không có thông tin huấn luyện liên quan."}
+
+        **Lịch sử trò chuyện**:
+        {context_str if context_str else "Không có lịch sử trò chuyện."}
+
+        **Câu hỏi người dùng**: {user_message}
+
+        **Hướng dẫn**:
+        - Trả lời bằng tiếng Việt, giọng điệu thân thiện, tự nhiên như một người bạn.
+        - Nếu thông tin huấn luyện khớp chính xác, sử dụng nó nhưng diễn đạt lại để tránh lặp lại nguyên văn.
+        - Nếu không chắc chắn, trả lời chung chung hoặc đề xuất người dùng cung cấp thêm thông tin.
+        """
+
+        # Gọi Gemini và thêm tag [Gemini]
+        response = await get_gemini_response(prompt)
+        tagged_response = f"[Gemini] {response}"
+        await update.message.reply_text(tagged_response)
+        logger.info(f"Sent Gemini response to {user_id}: {tagged_response}")
+        firestore_client.save_chat(user_id, user_message, tagged_response)
     except Exception as e:
         logger.error(f"Error in handle_message: {str(e)}")
         await update.message.reply_text(f"Lỗi: {str(e)}")
