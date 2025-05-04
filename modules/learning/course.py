@@ -1,6 +1,9 @@
 # File: /modules/learning/course.py
 from database.firestore import FirestoreClient
 from google.cloud import firestore
+import logging  # UPDATE: Thêm import logging
+
+logger = logging.getLogger(__name__)  # UPDATE: Khởi tạo logger
 
 class CourseManager:
     def __init__(self):
@@ -19,3 +22,4 @@ class CourseManager:
             "created_at": firestore.SERVER_TIMESTAMP
         }
         self.db.client.collection("courses").add(course_data)
+        logger.info(f"Course created by {admin_id}: {title}")  # UPDATE: Log thông tin
