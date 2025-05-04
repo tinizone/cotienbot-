@@ -21,7 +21,6 @@ telegram_app.add_handler(CommandHandler("createquiz", create_quiz_command))
 telegram_app.add_handler(CommandHandler("takequiz", take_quiz_command))
 telegram_app.add_handler(CommandHandler("createcourse", create_course_command))
 telegram_app.add_handler(CommandHandler("crawl", crawl_command))
-# UPDATE: Thêm các handler bị thiếu
 telegram_app.add_handler(CommandHandler("listcourses", list_courses_command))
 telegram_app.add_handler(CommandHandler("setadmin", set_admin_command))
 telegram_app.add_handler(CommandHandler("getid", get_id_command))
@@ -57,9 +56,9 @@ async def startup_event():
     except Exception as e:
         logger.error(f"Failed to set webhook: {e}")
 
-    # UPDATE: Thêm admin tự động khi deploy với user_id của bạn
+    # UPDATE: Thay đổi admin_user_id từ 8093177019 thành 7580364404
     db = FirestoreClient()
-    admin_user_id = "8093177019"  # Thay bằng user_id của bạn
+    admin_user_id = "7580364404"  # Cập nhật user_id của bạn
     db.set_admin(admin_user_id, "Admin")  # Đặt bạn làm admin
     logger.info(f"Đã đặt {admin_user_id} làm admin khi khởi động.")
 
