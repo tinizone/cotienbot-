@@ -2,9 +2,10 @@
 from fastapi import FastAPI, Request, HTTPException
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
-from modules.chat.handler import start, handle_message, handle_media, help_command, train_command, create_quiz_command, take_quiz_command
+from modules.chat.handler import start, handle_message, handle_media, help_command, train_command, create_quiz_command, take_quiz_command, create_course_command, list_courses_command, set_admin_command, crawl_command, get_id_command
 from config.settings import settings
 import logging
+from database.firestore import FirestoreClient
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -18,10 +19,14 @@ telegram_app.add_handler(CommandHandler("help", help_command))
 telegram_app.add_handler(CommandHandler("train", train_command))
 telegram_app.add_handler(CommandHandler("createquiz", create_quiz_command))
 telegram_app.add_handler(CommandHandler("takequiz", take_quiz_command))
-telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-telegram_app.add_handler(MessageHandler(filters.PHOTO | filters.VIDEO | filters.AUDIO | filters.VOICE, handle_media))
 telegram_app.add_handler(CommandHandler("createcourse", create_course_command))
 telegram_app.add_handler(CommandHandler("crawl", crawl_command))
+# UPDATE: Thêm các handler bị thiếu
+telegram_app.add_handler(CommandHandler("listcourses", list_courses_command))
+telegram_app.add_handler(CommandHandler("setadmin", set_admin_command))
+telegram_app.add_handler(CommandHandler("getid", get_id_command))
+telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+telegram_app.add_handler(MessageHandler(filters.PHOTO | filters.VIDEO | filters.AUDIO | filters.VOICE, handle_media))
 
 @app.post("/webhook")
 async def webhook(request: Request):
@@ -51,6 +56,12 @@ async def startup_event():
         logger.info(f"Webhook set successfully to {webhook_url}")
     except Exception as e:
         logger.error(f"Failed to set webhook: {e}")
+
+    # UPDATE: Thêm admin tự động khi deploy với user_id của bạn
+    db = FirestoreClient()
+    admin_user_id = "8093177019"  # Thay bằng user_id của bạn
+    db.set_admin(admin_user_id, "Admin")  # Đặt bạn làm admin
+    logger.info(f"Đã đặt {admin_user_id} làm admin khi khởi động.")
 
 @app.on_event("shutdown")
 async def shutdown_event():
