@@ -1,28 +1,43 @@
-# File: /modules/chat/gemini.py
+# UPDATE: /modules/chat/gemini.py
 from google.generativeai import GenerativeModel, configure
+from google.api_core import exceptions
 from config.settings import settings
 import logging
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 logger = logging.getLogger(__name__)
 
-def get_gemini_response(message: str) -> str:
+def get_latest_model() -> str:
+    """Get the latest Gemini model from available models."""
+    from google.generativeai import list_models
     try:
-        # Cấu hình API key
-        configure(api_key=settings.gemini_api_key)
-        
-        # Kiểm tra danh sách model (debug)
-        from google.api_core import exceptions
-        from google.generativeai import list_models
         models = list_models()
-        logger.info(f"Available models: {[model.name for model in models]}")
-        
-        # Sử dụng model mới nhất (có thể thay đổi dựa trên list_models)
-        model_name = "gemini-2.0-flash"  # Cập nhật tên model, kiểm tra từ list_models
-        model = GenerativeModel(model_name)
-        
-        response = model.generate_content(message)
-        return response.text if hasattr(response, "text") else "No response from Gemini AI"
-    except exceptions.NotFound as e:
-        return f"Error with Gemini AI: 404 {str(e)}. Check available models with ListModels."
+        gemini_models = [model.name for model in models if "gemini" in model.name.lower()]
+        logger.info(f"Available Gemini models: {gemini_models}")
+        return gemini_models[0] if gemini_models else "gemini-1.5-flash"  # Fallback
     except Exception as e:
-        return f"Error with Gemini AI: {str(e)}"
+        logger.error(f"Error listing models: {str(e)}")
+        return "gemini-1.5-flash"
+
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
+def get_gemini_response(message: str) -> str:
+    """Generate a response using the latest Gemini model."""
+    try:
+        configure(api_key=settings.gemini_api_key)
+        model_name = get_latest_model()
+        model = GenerativeModel(model_name)
+        response = model.generate_content(message)
+        if not hasattr(response, "text"):
+            logger.error(f"Invalid Gemini response: {response}")
+            return "No valid response from Gemini AI"
+        logger.info(f"Generated response with model {model_name}")
+        return response.text
+    except exceptions.NotFound as e:
+        logger.error(f"Gemini model not found: {str(e)}")
+        return f"Error: Model not found. Check available models."
+    except exceptions.ResourceExhausted as e:
+        logger.error(f"Gemini quota exceeded: {str(e)}")
+        return "Error: API quota exceeded. Please try again later."
+    except Exception as e:
+        logger.error(f"Error with Gemini AI: {str(e)}")
+        raise  # Let tenacity handle retries
