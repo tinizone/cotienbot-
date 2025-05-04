@@ -97,6 +97,11 @@ async def take_quiz_command(update: Update, context: CallbackContext) -> None:
 
 async def handle_message(update: Update, context: CallbackContext) -> None:
     try:
+        # Kiểm tra update.message có tồn tại không
+        if not update.message or not hasattr(update, "message"):
+            logger.error("Update does not contain a message.")
+            return
+
         user_id = str(update.message.from_user.id)
         user_message = update.message.text.lower()
         logger.info(f"Received message from {user_id}: {user_message}")
@@ -110,6 +115,7 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
             # Kiểm tra xem dữ liệu huấn luyện có thay đổi kể từ câu trả lời trước không
             if not latest_training_timestamp or chat_timestamp >= latest_training_timestamp:
                 response = similar_chat["response"]
+                # Đảm bảo reply_text được gọi đúng
                 await update.message.reply_text(response)
                 logger.info(f"Reused response for {user_id}: {response}")
                 firestore_client.save_chat(user_id, user_message, response)
@@ -143,13 +149,21 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
 
         # Gọi Gemini và thêm tag [Gemini]
         response = await get_gemini_response(prompt)
+        # Đảm bảo response là chuỗi trước khi thêm tag
+        if not isinstance(response, str):
+            logger.error(f"Gemini response is not a string: {response}")
+            response = "Lỗi: Không nhận được phản hồi hợp lệ từ Gemini."
         tagged_response = f"[Gemini] {response}"
         await update.message.reply_text(tagged_response)
         logger.info(f"Sent Gemini response to {user_id}: {tagged_response}")
         firestore_client.save_chat(user_id, user_message, tagged_response)
     except Exception as e:
         logger.error(f"Error in handle_message: {str(e)}")
-        await update.message.reply_text(f"Lỗi: {str(e)}")
+        # Sử dụng update.effective_message để an toàn hơn
+        if update and hasattr(update, "effective_message") and update.effective_message:
+            await update.effective_message.reply_text(f"Lỗi: {str(e)}")
+        else:
+            logger.error("Cannot reply to user: No effective message available.")
 
 async def handle_media(update: Update, context: CallbackContext) -> None:
     try:
