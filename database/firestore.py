@@ -2,7 +2,6 @@ from google.cloud import firestore
 from google.cloud.firestore_v1 import Client
 from config.settings import settings
 import json
-from sentence_transformers import SentenceTransformer
 from typing import List, Dict
 import numpy as np
 import logging
@@ -15,12 +14,13 @@ class FirestoreClient:
         credentials = json.loads(settings.firestore_credentials)
         self.client = firestore.Client.from_service_account_info(credentials)
         self.SERVER_TIMESTAMP = firestore.SERVER_TIMESTAMP
-        self._model = None  # Khởi tạo mô hình khi cần
+        self._model = None
 
     def _load_model(self):
         """Tải mô hình Sentence Transformers khi cần."""
         if self._model is None:
             logger.info("Đang tải mô hình Sentence Transformers...")
+            from sentence_transformers import SentenceTransformer  # Trì hoãn import
             self._model = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
         return self._model
 
