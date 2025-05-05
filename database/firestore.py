@@ -1,7 +1,9 @@
+# File: /database/firestore.py
 import logging
 from config.settings import settings
 import json
 from typing import List, Dict
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -16,127 +18,131 @@ class FirestoreClient:
         self.client = firestore.Client.from_service_account_info(credentials)
         self.SERVER_TIMESTAMP = firestore.SERVER_TIMESTAMP
         self._model = None
+        self.chat_buffer = {}
+        self.training_buffer = {}
+        self.training_embeddings = {}
+        self.BATCH_SIZE = 10
+        self.MAX_CHATS = 50
+        self.MAX_TRAINING = 50
+        self.training_cache = {}
+        self.similar_chat_cache = {}
+        self.embedding_cache = {}
         logger.info("Hoàn tất khởi tạo FirestoreClient (trong __init__)")
 
     def _load_model(self):
         if self._model is None:
             logger.info("Đang tải mô hình Sentence Transformers...")
             from sentence_transformers import SentenceTransformer
-            self._model = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
+            self._model = SentenceTransformer("all-MiniLM-L6-v2")
         return self._model
 
-    def get_user(self, user_id: str) -> Dict | None:
-        try:
-            doc = self.client.collection("users").document(user_id).get()
-            return doc.to_dict() if doc.exists else None
-        except self.GoogleCloudError as e:
-            logger.error(f"Lỗi khi lấy người dùng {user_id}: {str(e)}")
-            raise
+    def _get_embedding(self, text: str) -> list:
+        if text in self.embedding_cache:
+            return self.embedding_cache[text]
+        model = self._load_model()
+        embedding = model.encode(text).tolist()
+        self.embedding_cache[text] = embedding
+        return embedding
 
-    def save_user(self, user_id: str, data: Dict) -> None:
+    def save_chat(self, user_id: str, message: str, response: str, is_gemini: bool = False) -> None:
         try:
-            self.client.collection("users").document(user_id).set(data, merge=True)
-            logger.info(f"Đã lưu dữ liệu người dùng {user_id}")
-        except self.GoogleCloudError as e:
-            logger.error(f"Lỗi khi lưu người dùng {user_id}: {str(e)}")
-            raise
-
-    def save_chat(self, user_id: str, message: str, response: str) -> None:
-        try:
-            self.client.collection("chat_history").add({
-                "user_id": user_id,
+            if user_id not in self.chat_buffer:
+                self.chat_buffer[user_id] = []
+            self.chat_buffer[user_id].append({
                 "message": message,
                 "response": response,
+                "is_gemini": is_gemini,
                 "timestamp": self.SERVER_TIMESTAMP
             })
-            logger.info(f"Đã lưu trò chuyện cho người dùng {user_id}")
+
+            if len(self.chat_buffer[user_id]) >= self.BATCH_SIZE:
+                doc_ref = self.client.collection("chat_history").document(user_id)
+                current_chats = doc_ref.get().to_dict().get("chats", []) if doc_ref.get().exists else []
+                current_chats.extend(self.chat_buffer[user_id])
+                current_chats = current_chats[-self.MAX_CHATS:]
+                doc_ref.set({"chats": current_chats})
+                self.chat_buffer[user_id] = []
+                logger.info(f"Đã lưu lô trò chuyện cho người dùng {user_id}")
         except self.GoogleCloudError as e:
             logger.error(f"Lỗi khi lưu trò chuyện cho người dùng {user_id}: {str(e)}")
             raise
 
-    def get_chat_history(self, user_id: str, limit: int = 5) -> List[Dict]:
-        try:
-            docs = self.client.collection("chat_history")\
-                .where("user_id", "==", user_id)\
-                .order_by("timestamp", direction=firestore.Query.DESCENDING)\
-                .limit(limit).stream()
-            return [doc.to_dict() for doc in docs]
-        except self.GoogleCloudError as e:
-            logger.error(f"Lỗi khi lấy lịch sử trò chuyện cho người dùng {user_id}: {str(e)}")
-            raise
-
     def get_similar_chat(self, user_id: str, message: str) -> Dict | None:
         try:
-            docs = self.client.collection("chat_history")\
-                .where("user_id", "==", user_id)\
-                .where("message", "==", message.lower())\
-                .limit(1).stream()
-            for doc in docs:
-                return doc.to_dict()
+            cache_key = f"{user_id}:{message}"
+            if cache_key in self.similar_chat_cache:
+                logger.info(f"Trả lời từ cache lịch sử trò chuyện cho user {user_id}")
+                return self.similar_chat_cache[cache_key]
+
+            doc = self.client.collection("chat_history").document(user_id).get()
+            if not doc.exists:
+                return None
+            chats = doc.to_dict().get("chats", [])
+            for chat in chats:
+                if chat["message"].lower() == message.lower():
+                    self.similar_chat_cache[cache_key] = chat
+                    return chat
             return None
         except self.GoogleCloudError as e:
             logger.error(f"Lỗi khi tìm trò chuyện tương tự cho người dùng {user_id}: {str(e)}")
             raise
 
-    def save_training_data(self, user_id: str, info: str, data_type: str) -> str:
+    def save_training_data(self, user_id: str, info: str) -> str:
         try:
-            model = self._load_model()
-            embedding = model.encode(info).tolist()
-            doc_ref = self.client.collection("users").document(user_id).collection("training_data").document()
-            doc_ref.set({
+            embedding = self._get_embedding(info)
+            if user_id not in self.training_buffer:
+                self.training_buffer[user_id] = []
+            if user_id not in self.training_embeddings:
+                self.training_embeddings[user_id] = {}
+            self.training_buffer[user_id].append({
                 "info": info,
-                "type": data_type,
-                "embedding": embedding,
                 "created_at": self.SERVER_TIMESTAMP
             })
-            logger.info(f"Đã lưu dữ liệu huấn luyện cho người dùng {user_id}, ID: {doc_ref.id}")
-            return doc_ref.id
+            self.training_embeddings[user_id][info] = embedding
+
+            if len(self.training_buffer[user_id]) >= self.BATCH_SIZE:
+                doc_ref = self.client.collection("users").document(user_id)
+                current_training = doc_ref.get().to_dict().get("training_data", []) if doc_ref.get().exists else []
+                current_training.extend(self.training_buffer[user_id])
+                current_training = current_training[-self.MAX_TRAINING:]
+                doc_ref.set({"training_data": current_training})
+                self.training_buffer[user_id] = []
+                logger.info(f"Đã lưu lô dữ liệu huấn luyện cho người dùng {user_id}")
+            return "buffered"
         except self.GoogleCloudError as e:
             logger.error(f"Lỗi khi lưu dữ liệu huấn luyện cho người dùng {user_id}: {str(e)}")
             raise
 
     def get_training_data(self, user_id: str, query: str) -> List[Dict]:
         try:
-            import numpy as np  # Trì hoãn import numpy
-            model = self._load_model()
-            query_embedding = model.encode(query).tolist()
-            docs = self.client.collection("users").document(user_id).collection("training_data").stream()
+            import numpy as np
+            cache_key = f"{user_id}:{query}"
+            if cache_key in self.training_cache:
+                logger.info(f"Trả lời từ cache dữ liệu huấn luyện cho user {user_id}")
+                return self.training_cache[cache_key]
+
+            query_embedding = self._get_embedding(query)
+            doc = self.client.collection("users").document(user_id).get()
+            if not doc.exists:
+                return []
+            training_data = doc.to_dict().get("training_data", [])
             results = []
-            for doc in docs:
-                data = doc.to_dict()
-                if data["info"].lower() == query.lower():
-                    results.append({"id": doc.id, "info": data["info"], "type": data["type"], "similarity": 1.0})
+            for i, data in enumerate(training_data):
+                info = data["info"]
+                if info.lower() == query.lower():
+                    results.append({"id": f"item_{i}", "info": info, "similarity": 1.0})
                     continue
-                data_embedding = np.array(data["embedding"])
+                data_embedding = self.training_embeddings.get(user_id, {}).get(info)
+                if not data_embedding:
+                    continue
                 similarity = np.dot(query_embedding, data_embedding) / (
                     np.linalg.norm(query_embedding) * np.linalg.norm(data_embedding)
                 )
                 if similarity > 0.7:
-                    results.append({"id": doc.id, "info": data["info"], "type": data["type"], "similarity": similarity})
-            return sorted(results, key=lambda x: x["similarity"], reverse=True)
+                    results.append({"id": f"item_{i}", "info": info, "similarity": similarity})
+            results = sorted(results, key=lambda x: x["similarity"], reverse=True)
+            self.training_cache[cache_key] = results
+            return results
         except self.GoogleCloudError as e:
             logger.error(f"Lỗi khi lấy dữ liệu huấn luyện cho người dùng {user_id}: {str(e)}")
-            raise
-
-    def get_latest_training_data_timestamp(self, user_id: str) -> float | None:
-        try:
-            docs = self.client.collection("users").document(user_id).collection("training_data")\
-                .order_by("created_at", direction=firestore.Query.DESCENDING).limit(1).stream()
-            for doc in docs:
-                return doc.to_dict()["created_at"].timestamp()
-            return None
-        except self.GoogleCloudError as e:
-            logger.error(f"Lỗi khi lấy thời gian huấn luyện mới nhất cho người dùng {user_id}: {str(e)}")
-            raise
-
-    def set_admin(self, user_id: str, name: str = "Admin") -> None:
-        try:
-            self.save_user(user_id, {
-                "role": "admin",
-                "name": name,
-                "created_at": self.SERVER_TIMESTAMP
-            })
-            logger.info(f"Người dùng {user_id} được đặt làm admin với tên {name}")
-        except self.GoogleCloudError as e:
-            logger.error(f"Lỗi khi đặt admin cho người dùng {user_id}: {str(e)}")
             raise
