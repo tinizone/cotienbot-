@@ -11,6 +11,7 @@ from modules.chat.handler import (
     create_course_command, crawl_command, list_courses_command, set_admin_command,
     get_id_command, handle_message, handle_media
 )
+from modules.learning.crawler import crawl_rss
 import logging
 import asyncio
 import html
