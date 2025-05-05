@@ -1,48 +1,42 @@
+# File: /main.py
 import logging
+import importlib
+import os
+import asyncio
+from fastapi import FastAPI, Request, HTTPException
+from telegram.ext import Application, CommandHandler, MessageHandler, filters
+from telegram import Update
+from telegram.error import TelegramError
+from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_type
+from config.settings import settings
+from database.firestore import FirestoreClient
+
 logger = logging.getLogger(__name__)
 logger.info("Bắt đầu import các module cơ bản...")
 
-import asyncio
-import html
-from fastapi import FastAPI, Request, HTTPException
-
 logger.info("Hoàn tất import các module cơ bản")
-
-# Trì hoãn import các thư viện nặng
-def import_telegram_libs():
-    logger.info("Đang import các thư viện Telegram...")
-    from telegram.ext import Application, CommandHandler, MessageHandler, filters
-    from telegram import Update
-    from telegram.error import TelegramError
-    from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_type
-    logger.info("Hoàn tất import các thư viện Telegram")
-    return Application, CommandHandler, MessageHandler, filters, Update, TelegramError, retry, stop_after_attempt, wait_fixed, retry_if_exception_type
-
-def import_app_libs():
-    logger.info("Đang import các thư viện ứng dụng...")
-    from config.settings import settings
-    from database.firestore import FirestoreClient
-    from modules.chat.handler import (
-        start, help_command, train_command, create_quiz_command, take_quiz_command,
-        create_course_command, crawl_command, list_courses_command, set_admin_command,
-        get_id_command, handle_message, handle_media
-    )
-    from modules.learning.crawler import crawl_rss
-    logger.info("Hoàn tất import các thư viện ứng dụng")
-    return settings, FirestoreClient, (start, help_command, train_command, create_quiz_command, take_quiz_command,
-                                      create_course_command, crawl_command, list_courses_command, set_admin_command,
-                                      get_id_command, handle_message, handle_media), crawl_rss
 
 app = FastAPI()
 app.telegram_app = None
 app.initialized = False
 app.firestore_client = None
 
-# Import các thư viện sau khi FastAPI khởi tạo
-Application, CommandHandler, MessageHandler, filters, Update, TelegramError, retry, stop_after_attempt, wait_fixed, retry_if_exception_type = import_telegram_libs()
-settings, FirestoreClient, (start, help_command, train_command, create_quiz_command, take_quiz_command,
-                           create_course_command, crawl_command, list_courses_command, set_admin_command,
-                           get_id_command, handle_message, handle_media), crawl_rss = import_app_libs()
+# Hàm tải động các module từ thư mục modules/
+def load_modules():
+    module_handlers = []
+    modules_dir = "modules"
+    for filename in os.listdir(modules_dir):
+        if filename.endswith(".py") and filename != "__init__.py":
+            module_name = filename[:-3]  # Loại bỏ .py
+            try:
+                module = importlib.import_module(f"{modules_dir}.{module_name}")
+                logger.info(f"Đã tải module: {module_name}")
+                if hasattr(module, "register_handlers"):
+                    handlers = module.register_handlers()
+                    module_handlers.extend(handlers)
+            except Exception as e:
+                logger.error(f"Lỗi khi tải module {module_name}: {str(e)}")
+    return module_handlers
 
 async def get_telegram_app():
     if app.telegram_app is None:
@@ -52,18 +46,10 @@ async def get_telegram_app():
                 logger.error("TELEGRAM_TOKEN không được cung cấp")
                 raise ValueError("TELEGRAM_TOKEN không được cung cấp")
             app.telegram_app = Application.builder().token(settings.telegram_token).read_timeout(30).write_timeout(30).build()
-            app.telegram_app.add_handler(CommandHandler("start", start))
-            app.telegram_app.add_handler(CommandHandler("help", help_command))
-            app.telegram_app.add_handler(CommandHandler("train", train_command))
-            app.telegram_app.add_handler(CommandHandler("createquiz", create_quiz_command))
-            app.telegram_app.add_handler(CommandHandler("takequiz", take_quiz_command))
-            app.telegram_app.add_handler(CommandHandler("createcourse", create_course_command))
-            app.telegram_app.add_handler(CommandHandler("crawl", crawl_command))
-            app.telegram_app.add_handler(CommandHandler("listcourses", list_courses_command))
-            app.telegram_app.add_handler(CommandHandler("setadmin", set_admin_command))
-            app.telegram_app.add_handler(CommandHandler("getid", get_id_command))
-            app.telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-            app.telegram_app.add_handler(MessageHandler(filters.PHOTO | filters.VIDEO | filters.AUDIO | filters.VOICE, handle_media))
+            # Đăng ký handlers từ các module
+            handlers = load_modules()
+            for handler in handlers:
+                app.telegram_app.add_handler(handler)
             logger.info("Đã khởi tạo ứng dụng Telegram thành công")
         except TelegramError as e:
             logger.error(f"Lỗi Telegram khi khởi tạo telegram_app: {str(e)}")
@@ -138,21 +124,9 @@ async def startup_event():
         await set_webhook_with_retry(app.telegram_app, webhook_url)
         logger.info("Bước 3 hoàn tất: Webhook đã được thiết lập")
 
-        try:
-            logger.info("Bước 4: Khởi tạo FirestoreClient...")
-            db = get_firestore_client()
-            logger.info("Bước 4.1: FirestoreClient đã được khởi tạo")
-
-            admin_user_id = settings.admin_user_id
-            if admin_user_id:
-                logger.info(f"Đang đặt admin cho user {admin_user_id}")
-                db.set_admin(admin_user_id, "Admin")
-                logger.info(f"Đã đặt {admin_user_id} làm admin khi khởi động.")
-            else:
-                logger.info("Không có admin_user_id, bỏ qua bước đặt admin")
-        except Exception as e:
-            logger.error(f"Lỗi khi khởi tạo FirestoreClient hoặc đặt admin: {str(e)}")
-        logger.info("Bước 4 hoàn tất (tùy chọn)")
+        logger.info("Bước 4: Khởi tạo FirestoreClient...")
+        get_firestore_client()
+        logger.info("Bước 4 hoàn tất: FirestoreClient đã được khởi tạo")
     except TelegramError as e:
         logger.error(f"Lỗi Telegram trong startup_event: {str(e)}")
         app.initialized = False
@@ -168,6 +142,26 @@ async def shutdown_event():
         logger.info("Đang xóa webhook và tắt ứng dụng...")
         await app.telegram_app.bot.delete_webhook()
         await app.telegram_app.shutdown()
+        logger.info("Đang flush buffer Firestore...")
+        db = get_firestore_client()
+        # Flush chat buffer
+        for user_id, chats in db.chat_buffer.items():
+            if chats:
+                doc_ref = db.client.collection("chat_history").document(user_id)
+                current_chats = doc_ref.get().to_dict().get("chats", []) if doc_ref.get().exists else []
+                current_chats.extend(chats)
+                current_chats = current_chats[-db.MAX_CHATS:]
+                doc_ref.set({"chats": current_chats})
+                logger.info(f"Đã flush buffer trò chuyện cho user {user_id}")
+        # Flush training buffer
+        for user_id, training_data in db.training_buffer.items():
+            if training_data:
+                doc_ref = db.client.collection("users").document(user_id)
+                current_training = doc_ref.get().to_dict().get("training_data", []) if doc_ref.get().exists else []
+                current_training.extend(training_data)
+                current_training = current_training[-db.MAX_TRAINING:]
+                doc_ref.set({"training_data": current_training})
+                logger.info(f"Đã flush buffer huấn luyện cho user {user_id}")
         logger.info("Đã xóa webhook và tắt ứng dụng")
 
 if __name__ == "__main__":
