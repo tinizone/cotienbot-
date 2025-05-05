@@ -1,4 +1,3 @@
-# UPDATE: /database/firestore.py
 from google.cloud import firestore
 from google.cloud.firestore_v1 import Client
 from config.settings import settings
