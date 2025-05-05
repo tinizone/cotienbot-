@@ -71,7 +71,7 @@ async def create_quiz_command(update: Update, context: CallbackContext) -> None:
     try:
         user_id = str(update.message.from_user.id)
         quiz_id = quiz_manager.create_quiz(user_id)
-        await update.message.reply_text(f"Đã tạo quiz với ID: {quiz_id}")
+        await update.message.reply_text(f"Đã tạo quiz với ID: {quiz_id}\nSử dụng /takequiz để tham gia!")
     except Exception as e:
         logger.error(f"Lỗi trong create_quiz_command: {str(e)}")
         await update.message.reply_text("Lỗi khi tạo quiz. Vui lòng thử lại.")
@@ -90,8 +90,12 @@ async def create_course_command(update: Update, context: CallbackContext) -> Non
     """Xử lý lệnh /createcourse."""
     try:
         user_id = str(update.message.from_user.id)
-        course_id = course_manager.create_course(user_id)
-        await update.message.reply_text(f"Đã tạo khóa học với ID: {course_id}")
+        if not context.args:
+            await update.message.reply_text("Vui lòng cung cấp tên khóa học, ví dụ: /createcourse Python Cơ Bản")
+            return
+        course_name = " ".join(context.args)
+        course_id = course_manager.create_course(user_id, course_name)
+        await update.message.reply_text(f"Đã tạo khóa học với ID: {course_id}\nTên: {course_name}")
     except Exception as e:
         logger.error(f"Lỗi trong create_course_command: {str(e)}")
         await update.message.reply_text("Lỗi khi tạo khóa học. Vui lòng thử lại.")
@@ -107,29 +111,75 @@ async def crawl_command(update: Update, context: CallbackContext) -> None:
 async def list_courses_command(update: Update, context: CallbackContext) -> None:
     """Xử lý lệnh /listcourses."""
     try:
-        courses $
+        user_id = str(update.message.from_user.id)
+        courses = course_manager.list_courses(user_id)
+        if not courses:
+            await update.message.reply_text("Chưa có khóa học nào. Tạo mới bằng /createcourse!")
+            return
+        await update.message.reply_text("Danh sách khóa học:\n" + "\n".join(courses))
+    except Exception as e:
+        logger.error(f"Lỗi trong list_courses_command: {str(e)}")
+        await update.message.reply_text("Lỗi khi liệt kê khóa học. Vui lòng thử lại.")
 
----
+async def set_admin_command(update: Update, context: CallbackContext) -> None:
+    """Xử lý lệnh /setadmin."""
+    try:
+        user_id = str(update.message.from_user.id)
+        user_data = firestore_client.get_user(user_id)
+        if not user_data or user_data.get("role") != "admin":
+            await update.message.reply_text("Bạn không có quyền thực hiện lệnh này!")
+            return
+        if not context.args:
+            await update.message.reply_text("Vui lòng cung cấp ID người dùng để đặt làm admin, ví dụ: /setadmin 123456789")
+            return
+        target_user_id = context.args[0]
+        firestore_client.set_admin(target_user_id, "Admin")
+        await update.message.reply_text(f"Đã đặt người dùng {target_user_id} làm admin!")
+    except Exception as e:
+        logger.error(f"Lỗi trong set_admin_command: {str(e)}")
+        await update.message.reply_text("Lỗi khi đặt admin. Vui lòng thử lại.")
 
-### 3. Các File Khác (Giả Định)
+async def get_id_command(update: Update, context: CallbackContext) -> None:
+    """Xử lý lệnh /getid."""
+    try:
+        user_id = str(update.message.from_user.id)
+        await update.message.reply_text(f"ID của bạn là: {user_id}")
+    except Exception as e:
+        logger.error(f"Lỗi trong get_id_command: {str(e)}")
+        await update.message.reply_text("Lỗi khi lấy ID. Vui lòng thử lại.")
 
-#### `/config/settings.py`
-Tôi giả định bạn có file này để quản lý cấu hình (dựa trên các import trong `main.py`). Nếu không, bạn cần tạo file này.
+async def handle_message(update: Update, context: CallbackContext) -> None:
+    """Xử lý tin nhắn văn bản."""
+    try:
+        user_id = str(update.message.from_user.id)
+        message = html.escape(update.message.text)
+        response = f"Echo: {message}"  # Thay thế bằng logic xử lý AI nếu cần
+        firestore_client.save_chat(user_id, message, response)
+        await update.message.reply_text(response)
+    except Exception as e:
+        logger.error(f"Lỗi trong handle_message: {str(e)}")
+        await update.message.reply_text("Lỗi khi xử lý tin nhắn. Vui lòng thử lại.")
 
-```python
-from pydantic_settings import BaseSettings
-from dotenv import load_dotenv
-
-load_dotenv()
-
-class Settings(BaseSettings):
-    telegram_token: str
-    render_domain: str
-    firestore_credentials: str
-    admin_user_id: str
-
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-
-settings = Settings()
+async def handle_media(update: Update, context: CallbackContext) -> None:
+    """Xử lý tin nhắn media (giọng nói, ảnh, video)."""
+    try:
+        user_id = str(update.message.from_user.id)
+        if update.message.photo:
+            await update.message.reply_text("Tính năng xử lý ảnh sẽ sớm ra mắt! 📸")
+        elif update.message.video:
+            await update.message.reply_text("Tính năng xử lý video sẽ sớm ra mắt! 🎥")
+        elif update.message.voice:
+            voice = update.message.voice
+            file = await voice.get_file()
+            audio_data = await file.download_as_bytearray()
+            speech = SpeechProcessor()
+            result = await speech.speech_to_text(audio_data)
+            if result["status"] == "success":
+                text = html.escape(result["text"])
+                doc_id = firestore_client.save_training_data(user_id, text, "speech")
+                await update.message.reply_text(f"Đã lưu giọng nói: {text} (ID: {doc_id})")
+            else:
+                await update.message.reply_text(f"Lỗi: {result['message']}")
+    except Exception as e:
+        logger.error(f"Lỗi trong handle_media: {str(e)}")
+        await update.message.reply_text("Lỗi khi xử lý media. Vui lòng thử lại.")
