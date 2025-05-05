@@ -6,6 +6,7 @@ import logging
 import google.generativeai as genai
 from config.settings import settings
 from database.firestore import FirestoreClient
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -29,14 +30,16 @@ def get_gemini_model():
     return model
 
 async def start(update: Update, context: CallbackContext) -> None:
+    logger.info(f"Received /start command from user {update.message.from_user.id}")
     await update.message.reply_text(
         "Chào mừng bạn đến với CotienBot! 🤖\n"
         "Tôi là trợ lý cá nhân của bạn, có thể trò chuyện và học hỏi từ dữ liệu bạn cung cấp.\n"
         "Dùng /help để xem danh sách lệnh."
     )
-    logger.info(f"Người dùng {update.message.from_user.id} đã dùng lệnh /start")
+    logger.info(f"Đã phản hồi /start cho user {update.message.from_user.id}")
 
 async def help_command(update: Update, context: CallbackContext) -> None:
+    logger.info(f"Received /help command from user {update.message.from_user.id}")
     await update.message.reply_text(
         "Danh sách lệnh:\n"
         "/start - Bắt đầu trò chuyện\n"
@@ -45,18 +48,19 @@ async def help_command(update: Update, context: CallbackContext) -> None:
         "/getid - Lấy ID người dùng\n"
         "Gửi tin nhắn bất kỳ để trò chuyện!"
     )
-    logger.info(f"Người dùng {update.message.from_user.id} đã dùng lệnh /help")
+    logger.info(f"Đã phản hồi /help cho user {update.message.from_user.id}")
 
 async def get_id_command(update: Update, context: CallbackContext) -> None:
     user_id = str(update.message.from_user.id)
+    logger.info(f"Received /getid command from user {user_id}")
     await update.message.reply_text(f"ID của bạn là: {user_id}")
-    logger.info(f"Người dùng {user_id} đã dùng lệnh /getid")
+    logger.info(f"Đã phản hồi /getid cho user {user_id}")
 
 async def handle_message(update: Update, context: CallbackContext) -> None:
     try:
         user_id = str(update.message.from_user.id)
         message = update.message.text
-        logger.info(f"Người dùng {user_id} đã gửi tin nhắn: {message}")
+        logger.info(f"Received message from user {user_id}: {message}")
 
         db = FirestoreClient()
 
@@ -103,14 +107,18 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
         await update.message.reply_text(fallback_response)
 
 async def handle_media(update: Update, context: CallbackContext) -> None:
+    logger.info(f"Received media from user {update.message.from_user.id}")
     await update.message.reply_text("Tôi đã nhận được media! Tôi sẽ cố gắng xử lý nó.")
-    logger.info(f"Người dùng {update.message.from_user.id} đã gửi media")
+    logger.info(f"Đã phản hồi media cho user {update.message.from_user.id}")
 
 def register_handlers():
-    return [
+    logger.info("Đăng ký các handler trong chat.py...")
+    handlers = [
         CommandHandler("start", start),
         CommandHandler("help", help_command),
         CommandHandler("getid", get_id_command),
         MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message),
         MessageHandler(filters.PHOTO | filters.VIDEO | filters.AUDIO | filters.VOICE, handle_media)
     ]
+    logger.info(f"Đã đăng ký {len(handlers)} handler trong chat.py")
+    return handlers
