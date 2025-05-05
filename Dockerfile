@@ -6,6 +6,7 @@ WORKDIR /app
 # Nâng cấp pip và cài đặt phụ thuộc
 RUN pip install --upgrade pip
 COPY requirements.txt .
+RUN pip cache purge
 RUN pip install --no-cache-dir --root-user-action=ignore -r requirements.txt
 
 # Sao chép mã nguồn
