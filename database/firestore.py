@@ -27,13 +27,15 @@ class FirestoreClient:
         self.training_cache = {}
         self.similar_chat_cache = {}
         self.embedding_cache = {}
+        self.chat_history_cache = {}  # Cache lịch sử trò chuyện
+        self.training_data_cache = {}  # Cache dữ liệu huấn luyện
         logger.info("Hoàn tất khởi tạo FirestoreClient (trong __init__)")
 
     def _load_model(self):
         if self._model is None:
             logger.info("Đang tải mô hình Sentence Transformers...")
             from sentence_transformers import SentenceTransformer
-            self._model = SentenceTransformer("all-MiniLM-L6-v2")
+            self._model = SentenceTransformer("all-MiniLM-L2-v2")  # Nhẹ hơn L6
         return self._model
 
     def _get_embedding(self, text: str) -> list:
@@ -55,6 +57,10 @@ class FirestoreClient:
                 "timestamp": self.SERVER_TIMESTAMP
             })
 
+            # Cập nhật cache
+            if user_id in self.chat_history_cache:
+                self.chat_history_cache[user_id].append(self.chat_buffer[user_id][-1])
+
             if len(self.chat_buffer[user_id]) >= self.BATCH_SIZE:
                 doc_ref = self.client.collection("chat_history").document(user_id)
                 current_chats = doc_ref.get().to_dict().get("chats", []) if doc_ref.get().exists else []
@@ -62,6 +68,8 @@ class FirestoreClient:
                 current_chats = current_chats[-self.MAX_CHATS:]
                 doc_ref.set({"chats": current_chats})
                 self.chat_buffer[user_id] = []
+                # Cập nhật cache sau khi lưu
+                self.chat_history_cache[user_id] = current_chats
                 logger.info(f"Đã lưu lô trò chuyện cho người dùng {user_id}")
         except self.GoogleCloudError as e:
             logger.error(f"Lỗi khi lưu trò chuyện cho người dùng {user_id}: {str(e)}")
@@ -69,19 +77,37 @@ class FirestoreClient:
 
     def get_similar_chat(self, user_id: str, message: str) -> Dict | None:
         try:
+            import numpy as np
             cache_key = f"{user_id}:{message}"
             if cache_key in self.similar_chat_cache:
                 logger.info(f"Trả lời từ cache lịch sử trò chuyện cho user {user_id}")
                 return self.similar_chat_cache[cache_key]
 
-            doc = self.client.collection("chat_history").document(user_id).get()
-            if not doc.exists:
+            # Kiểm tra cache lịch sử trò chuyện
+            if user_id not in self.chat_history_cache:
+                doc = self.client.collection("chat_history").document(user_id).get()
+                chats = doc.to_dict().get("chats", []) if doc.exists else []
+                self.chat_history_cache[user_id] = chats
+            chats = self.chat_history_cache[user_id]
+            if not chats:
                 return None
-            chats = doc.to_dict().get("chats", [])
+
+            # Sử dụng embedding để tìm tin nhắn tương tự
+            message_embedding = self._get_embedding(message)
+            best_match = None
+            highest_similarity = 0.0
             for chat in chats:
-                if chat["message"].lower() == message.lower():
-                    self.similar_chat_cache[cache_key] = chat
-                    return chat
+                chat_message = chat["message"]
+                chat_embedding = self._get_embedding(chat_message)
+                similarity = np.dot(message_embedding, chat_embedding) / (
+                    np.linalg.norm(message_embedding) * np.linalg.norm(chat_embedding)
+                )
+                if similarity > 0.7 and similarity > highest_similarity:
+                    highest_similarity = similarity
+                    best_match = chat
+            if best_match:
+                self.similar_chat_cache[cache_key] = best_match
+                return best_match
             return None
         except self.GoogleCloudError as e:
             logger.error(f"Lỗi khi tìm trò chuyện tương tự cho người dùng {user_id}: {str(e)}")
@@ -100,6 +126,10 @@ class FirestoreClient:
             })
             self.training_embeddings[user_id][info] = embedding
 
+            # Cập nhật cache
+            if user_id in self.training_data_cache:
+                self.training_data_cache[user_id].append(self.training_buffer[user_id][-1])
+
             if len(self.training_buffer[user_id]) >= self.BATCH_SIZE:
                 doc_ref = self.client.collection("users").document(user_id)
                 current_training = doc_ref.get().to_dict().get("training_data", []) if doc_ref.get().exists else []
@@ -107,6 +137,8 @@ class FirestoreClient:
                 current_training = current_training[-self.MAX_TRAINING:]
                 doc_ref.set({"training_data": current_training})
                 self.training_buffer[user_id] = []
+                # Cập nhật cache sau khi lưu
+                self.training_data_cache[user_id] = current_training
                 logger.info(f"Đã lưu lô dữ liệu huấn luyện cho người dùng {user_id}")
             return "buffered"
         except self.GoogleCloudError as e:
@@ -121,11 +153,14 @@ class FirestoreClient:
                 logger.info(f"Trả lời từ cache dữ liệu huấn luyện cho user {user_id}")
                 return self.training_cache[cache_key]
 
+            # Kiểm tra cache dữ liệu huấn luyện
+            if user_id not in self.training_data_cache:
+                doc = self.client.collection("users").document(user_id).get()
+                training_data = doc.to_dict().get("training_data", []) if doc.exists else []
+                self.training_data_cache[user_id] = training_data
+            training_data = self.training_data_cache[user_id]
+
             query_embedding = self._get_embedding(query)
-            doc = self.client.collection("users").document(user_id).get()
-            if not doc.exists:
-                return []
-            training_data = doc.to_dict().get("training_data", [])
             results = []
             for i, data in enumerate(training_data):
                 info = data["info"]
@@ -138,7 +173,7 @@ class FirestoreClient:
                 similarity = np.dot(query_embedding, data_embedding) / (
                     np.linalg.norm(query_embedding) * np.linalg.norm(data_embedding)
                 )
-                if similarity > 0.7:
+                if similarity > 0.6:
                     results.append({"id": f"item_{i}", "info": info, "similarity": similarity})
             results = sorted(results, key=lambda x: x["similarity"], reverse=True)
             self.training_cache[cache_key] = results
