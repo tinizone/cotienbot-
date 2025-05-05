@@ -1,7 +1,8 @@
+import logging
+logger = logging.getLogger(__name__)
+logger.info("Bắt đầu import các module...")  # Log ngay từ đầu
+
 from fastapi import FastAPI, Request, HTTPException
-from slowapi import Limiter
-from slowapi.util import get_remote_address
-from slowapi.errors import RateLimitExceeded
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 from telegram import Update
 from config.settings import settings
@@ -12,26 +13,14 @@ from modules.chat.handler import (
     get_id_command, handle_message, handle_media
 )
 from modules.learning.crawler import crawl_rss
-import logging
 import asyncio
 import html
 from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_type
 from telegram.error import TelegramError
 
-logger = logging.getLogger(__name__)
+logger.info("Hoàn tất import các module")
 
-# Khởi tạo FastAPI và Limiter
 app = FastAPI()
-limiter = Limiter(key_func=get_remote_address)
-app.state.limiter = limiter
-
-# Xử lý lỗi RateLimitExceeded
-async def _rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
-    return HTTPException(status_code=429, detail="Rate limit exceeded")
-
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-
-# Lưu telegram_app như thuộc tính của app
 app.telegram_app = None
 app.initialized = False
 app.firestore_client = None
@@ -76,9 +65,7 @@ def get_firestore_client():
             raise
     return app.firestore_client
 
-# Route webhook cho Telegram
 @app.post("/webhook")
-@limiter.limit("10/minute")
 async def webhook(request: Request):
     try:
         if not app.initialized or app.telegram_app is None:
@@ -91,20 +78,16 @@ async def webhook(request: Request):
         await app.telegram_app.process_update(update)
         logger.info("Xử lý webhook thành công")
         return {"status": "ok"}
-    except RateLimitExceeded:
-        raise
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Lỗi khi xử lý webhook: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# Route gốc
 @app.get("/")
 async def root():
     return {"message": "CotienBot đang chạy!"}
 
-# Retry logic cho set_webhook
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(2), retry=retry_if_exception_type(Exception))
 async def set_webhook_with_retry(telegram_app, webhook_url):
     logger.info(f"Thử thiết lập webhook tới {webhook_url}")
@@ -118,35 +101,29 @@ async def set_webhook_with_retry(telegram_app, webhook_url):
         logger.error(f"Lỗi không xác định khi thiết lập webhook: {str(e)}")
         raise
 
-# Sự kiện khởi động
 @app.on_event("startup")
 async def startup_event():
     logger.info("Bắt đầu sự kiện khởi động...")
     try:
-        # Bước 1: Khởi tạo telegram_app
         logger.info("Bước 1: Khởi tạo telegram_app...")
         await get_telegram_app()
         logger.info("Bước 1 hoàn tất: telegram_app đã được khởi tạo")
 
-        # Bước 2: Gọi initialize()
         logger.info("Bước 2: Đang gọi Application.initialize()...")
         await app.telegram_app.initialize()
         logger.info("Bước 2 hoàn tất: Application.initialize() thành công")
         app.initialized = True
 
-        # Bước 3: Thiết lập webhook
         logger.info("Bước 3: Thiết lập webhook...")
         webhook_url = f"https://{settings.render_domain}/webhook"
         await set_webhook_with_retry(app.telegram_app, webhook_url)
         logger.info("Bước 3 hoàn tất: Webhook đã được thiết lập")
 
-        # Bước 4: Khởi tạo FirestoreClient (tùy chọn, không làm gián đoạn nếu lỗi)
         try:
             logger.info("Bước 4: Khởi tạo FirestoreClient...")
             db = get_firestore_client()
             logger.info("Bước 4.1: FirestoreClient đã được khởi tạo")
 
-            # Đặt admin nếu có
             admin_user_id = settings.admin_user_id
             if admin_user_id:
                 logger.info(f"Đang đặt admin cho user {admin_user_id}")
@@ -156,7 +133,6 @@ async def startup_event():
                 logger.info("Không có admin_user_id, bỏ qua bước đặt admin")
         except Exception as e:
             logger.error(f"Lỗi khi khởi tạo FirestoreClient hoặc đặt admin: {str(e)}")
-            # Không raise, tiếp tục chạy để webhook hoạt động
         logger.info("Bước 4 hoàn tất (tùy chọn)")
     except TelegramError as e:
         logger.error(f"Lỗi Telegram trong startup_event: {str(e)}")
@@ -167,7 +143,6 @@ async def startup_event():
         app.initialized = False
         raise
 
-# Sự kiện tắt
 @app.on_event("shutdown")
 async def shutdown_event():
     if app.telegram_app and app.initialized:
