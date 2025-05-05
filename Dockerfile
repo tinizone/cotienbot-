@@ -1,4 +1,3 @@
-# UPDATE: Dockerfile
 FROM python:3.11-slim
 
 # Cài dependencies cần thiết
