@@ -1,63 +1,79 @@
-# File: /modules/chat.py
-from telegram.ext import CommandHandler, MessageHandler, filters
-from telegram import Update
-from telegram.ext import CallbackContext
 import logging
-import google.generativeai as genai
-from config.settings import settings
-from database.firestore import FirestoreClient
 import time
+import random
+from telegram import Update
+from telegram.ext import CallbackContext, CommandHandler, MessageHandler, filters
+from database.firestore import FirestoreClient
+from config.settings import settings
+import google.generativeai as genai
 
 logger = logging.getLogger(__name__)
 
-# Cấu hình Gemini API
 genai.configure(api_key=settings.gemini_api_key)
-model = None
+FALLBACK_RESPONSES = [
+    "Xin lỗi, tôi không hiểu câu hỏi của bạn. Bạn có thể hỏi lại không?",
+    "Hmm, tôi chưa biết cách trả lời câu này. Hãy thử hỏi theo cách khác nhé!",
+    "Tôi đang gặp chút khó khăn. Bạn có thể cung cấp thêm thông tin không?",
+]
+GEMINI_RATE_LIMIT = 50
 gemini_call_count = 0
 last_reset_time = time.time()
-GEMINI_RATE_LIMIT = 50
-FALLBACK_RESPONSES = [
-    "Xin lỗi, tôi đang gặp chút vấn đề. Bạn có thể hỏi lại không? 😊",
-    "Tôi không hiểu câu hỏi này, bạn có thể giải thích thêm không?",
-    "Có vẻ tôi cần thêm thông tin để trả lời. Bạn có thể dùng /train để huấn luyện tôi không?"
-]
-
-def get_gemini_model():
-    global model
-    if model is None:
-        logger.info("Đang khởi tạo mô hình Gemini...")
-        model = genai.GenerativeModel("gemini-1.5-flash")
-    return model
 
 async def start(update: Update, context: CallbackContext) -> None:
-    logger.info(f"Received /start command from user {update.message.from_user.id}")
-    await update.message.reply_text(
-        "Chào mừng bạn đến với CotienBot! 🤖\n"
-        "Tôi là trợ lý cá nhân của bạn, có thể trò chuyện và học hỏi từ dữ liệu bạn cung cấp.\n"
-        "Dùng /help để xem danh sách lệnh."
-    )
-    logger.info(f"Đã phản hồi /start cho user {update.message.from_user.id}")
+    try:
+        welcome_message = (
+            "Chào mừng bạn đến với CotienBot! 🤖\n"
+            "Tôi là trợ lý cá nhân của bạn, có thể trò chuyện và học hỏi từ dữ liệu bạn cung cấp.\n"
+            "Dùng /help để xem danh sách lệnh."
+        )
+        await update.message.reply_text(welcome_message)
+        logger.info(f"Gửi tin nhắn chào mừng tới user {update.message.from_user.id}")
+    except Exception as e:
+        logger.error(f"Lỗi trong start: {str(e)}", exc_info=True)
+        await update.message.reply_text("Xin lỗi, đã có lỗi xảy ra. Vui lòng thử lại!")
 
 async def help_command(update: Update, context: CallbackContext) -> None:
-    logger.info(f"Received /help command from user {update.message.from_user.id}")
-    await update.message.reply_text(
-        "Danh sách lệnh:\n"
-        "/start - Bắt đầu trò chuyện\n"
-        "/help - Hiển thị danh sách lệnh\n"
-        "/train <text> - Huấn luyện bot với dữ liệu cá nhân\n"
-        "/getid - Lấy ID người dùng\n"
-        "Gửi tin nhắn bất kỳ để trò chuyện!"
-    )
-    logger.info(f"Đã phản hồi /help cho user {update.message.from_user.id}")
+    try:
+        help_message = (
+            "Danh sách lệnh:\n"
+            "/start - Khởi động bot\n"
+            "/help - Hiển thị trợ giúp\n"
+            "/train <thông tin> - Huấn luyện bot với thông tin của bạn\n"
+            "Hoặc bạn có thể trò chuyện tự nhiên với tôi!"
+        )
+        await update.message.reply_text(help_message)
+        logger.info(f"Gửi tin nhắn trợ giúp tới user {update.message.from_user.id}")
+    except Exception as e:
+        logger.error(f"Lỗi trong help_command: {str(e)}", exc_info=True)
+        await update.message.reply_text("Xin lỗi, đã có lỗi xảy ra. Vui lòng thử lại!")
 
-async def get_id_command(update: Update, context: CallbackContext) -> None:
-    user_id = str(update.message.from_user.id)
-    logger.info(f"Received /getid command from user {user_id}")
-    await update.message.reply_text(f"ID của bạn là: {user_id}")
-    logger.info(f"Đã phản hồi /getid cho user {user_id}")
+async def train_command(update: Update, context: CallbackContext) -> None:
+    try:
+        user_id = str(update.message.from_user.id)
+        info = " ".join(context.args) if context.args else None
+        if not info:
+            await update.message.reply_text("Vui lòng cung cấp thông tin để huấn luyện. Ví dụ: /train tôi tên là Vinh")
+            logger.info(f"User {user_id} không cung cấp thông tin huấn luyện")
+            return
+
+        db = FirestoreClient()
+        result = db.save_training_data(user_id, info)
+        if result == "buffered":
+            await update.message.reply_text(f"Đã lưu dữ liệu huấn luyện: {info} (ID: {result})")
+            logger.info(f"Đã lưu dữ liệu huấn luyện cho user {user_id}: {info}")
+        else:
+            await update.message.reply_text("Đã lưu dữ liệu huấn luyện thành công!")
+            logger.info(f"Đã lưu dữ liệu huấn luyện trực tiếp cho user {user_id}: {info}")
+    except Exception as e:
+        logger.error(f"Lỗi trong train_command: {str(e)}", exc_info=True)
+        await update.message.reply_text("Xin lỗi, đã có lỗi khi lưu dữ liệu huấn luyện. Vui lòng thử lại!")
+
+def get_gemini_model():
+    return genai.GenerativeModel("gemini-1.5-flash")
 
 async def handle_message(update: Update, context: CallbackContext) -> None:
     try:
+        start_time = time.time()
         user_id = str(update.message.from_user.id)
         message = update.message.text
         logger.info(f"Received message from user {user_id}: {message}")
@@ -70,16 +86,15 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
             response = similar_chat["response"]
             await update.message.reply_text(response)
             logger.info(f"Trả lời từ lịch sử trò chuyện cho user {user_id}: {response}")
+            logger.info(f"Thời gian xử lý: {time.time() - start_time:.2f} giây")
             return
 
-        # Tìm trong dữ liệu huấn luyện cá nhân
+        # Lấy dữ liệu huấn luyện đã lọc
         training_data = db.get_training_data(user_id, message)
+        training_context = []
         if training_data:
-            response = training_data[0]["info"]
-            await update.message.reply_text(f"Dựa trên dữ liệu huấn luyện: {response}")
-            db.save_chat(user_id, message, response)
-            logger.info(f"Trả lời từ dữ liệu huấn luyện cho user {user_id}: {response}")
-            return
+            training_context = [item["info"] for item in training_data]
+        training_context_str = "\n".join([f"Người dùng đã huấn luyện: {info}" for info in training_context])
 
         # Kiểm tra giới hạn Gemini API
         global gemini_call_count, last_reset_time
@@ -90,6 +105,7 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
         if gemini_call_count >= GEMINI_RATE_LIMIT:
             await update.message.reply_text("Đã đạt giới hạn yêu cầu Gemini. Vui lòng thử lại sau!")
             logger.warning(f"Đã đạt giới hạn Gemini API cho user {user_id}")
+            logger.info(f"Thời gian xử lý: {time.time() - start_time:.2f} giây")
             return
 
         # Kiểm tra cache Gemini
@@ -98,6 +114,7 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
             response = db.gemini_cache[gemini_cache_key]
             await update.message.reply_text(f"[Gemini] {response}")
             logger.info(f"Trả lời từ cache Gemini cho user {user_id}: {response}")
+            logger.info(f"Thời gian xử lý: {time.time() - start_time:.2f} giây")
             return
 
         # Lấy ngữ cảnh từ lịch sử trò chuyện gần đây
@@ -108,40 +125,58 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
             context_messages = [f"User: {chat['message']}\nBot: {chat['response']}" for chat in chats[-3:]]
         context_str = "\n".join(context_messages)
 
-        # Gọi Gemini với ngữ cảnh
-        logger.info(f"Không tìm thấy dữ liệu huấn luyện, gọi Gemini cho user {user_id}")
+        # Gọi Gemini với dữ liệu đã lọc
+        logger.info(f"Gọi Gemini cho user {user_id} với dữ liệu đã lọc")
         gemini_model = get_gemini_model()
-        prompt = f"Ngữ cảnh:\n{context_str}\n\nCâu hỏi: {message}"
-        response = gemini_model.generate_content(prompt).text
+        prompt = (
+            "Bạn là một trợ lý thông minh. Dựa trên dữ liệu huấn luyện và lịch sử trò chuyện, hãy trả lời câu hỏi của người dùng một cách tự nhiên và chính xác.\n\n"
+            f"Dữ liệu huấn luyện:\n{training_context_str}\n\n"
+            f"Lịch sử trò chuyện:\n{context_str}\n\n"
+            f"Câu hỏi: {message}\n\n"
+            "Trả lời:"
+        )
+        from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_type
+        @retry(
+            stop=stop_after_attempt(3),
+            wait=wait_fixed(2),
+            retry=retry_if_exception_type(Exception),
+            before_sleep=lambda retry_state: logger.info(f"Retry Gemini API: attempt {retry_state.attempt_number}")
+        )
+        def call_gemini_with_timeout():
+            import signal
+            def timeout_handler(signum, frame):
+                raise TimeoutError("Timeout of 10s exceeded")
+            signal.signal(signal.SIGALRM, timeout_handler)
+            signal.alarm(10)
+            try:
+                return gemini_model.generate_content(prompt).text
+            finally:
+                signal.alarm(0)
+
+        try:
+            response = call_gemini_with_timeout()
+        except Exception as e:
+            logger.error(f"Lỗi khi gọi Gemini API: {str(e)}")
+            response = "Xin lỗi, tôi không thể trả lời ngay bây giờ. Hãy thử lại sau!"
+            await update.message.reply_text(response)
+            logger.info(f"Thời gian xử lý: {time.time() - start_time:.2f} giây")
+            return
         gemini_call_count += 1
 
         # Cache kết quả Gemini
         if not hasattr(db, "gemini_cache"):
             db.gemini_cache = {}
+            db.gemini_cache_max_size = 1000
+        if len(db.gemini_cache) >= db.gemini_cache_max_size:
+            db.gemini_cache.clear()
         db.gemini_cache[gemini_cache_key] = response
 
         await update.message.reply_text(f"[Gemini] {response}")
         db.save_chat(user_id, message, response, is_gemini=True)
         logger.info(f"Trả lời từ Gemini cho user {user_id}: {response}")
+        logger.info(f"Thời gian xử lý: {time.time() - start_time:.2f} giây")
     except Exception as e:
-        logger.error(f"Lỗi trong handle_message: {str(e)}")
-        import random
+        logger.error(f"Lỗi trong handle_message: {str(e)}", exc_info=True)
         fallback_response = random.choice(FALLBACK_RESPONSES)
         await update.message.reply_text(fallback_response)
-
-async def handle_media(update: Update, context: CallbackContext) -> None:
-    logger.info(f"Received media from user {update.message.from_user.id}")
-    await update.message.reply_text("Tôi đã nhận được media! Tôi sẽ cố gắng xử lý nó.")
-    logger.info(f"Đã phản hồi media cho user {update.message.from_user.id}")
-
-def register_handlers():
-    logger.info("Đăng ký các handler trong chat.py...")
-    handlers = [
-        CommandHandler("start", start),
-        CommandHandler("help", help_command),
-        CommandHandler("getid", get_id_command),
-        MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message),
-        MessageHandler(filters.PHOTO | filters.VIDEO | filters.AUDIO | filters.VOICE, handle_media)
-    ]
-    logger.info(f"Đã đăng ký {len(handlers)} handler trong chat.py")
-    return handlers
+        logger.info(f"Thời gian xử lý: {time.time() - start_time:.2f} giây")
