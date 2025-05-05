@@ -112,7 +112,7 @@ async def startup_event():
     try:
         logger.info("Bước 1: Khởi tạo telegram_app...")
         await get_telegram_app()
-        logger.info("Bước 1 hoàn tất: telegram_app đã được khởi tạo")
+        logger.info(f"Bước 1 hoàn tất: telegram_app initialized={app.telegram_app is not None}")
 
         logger.info("Bước 2: Đang gọi Application.initialize()...")
         await app.telegram_app.initialize()
@@ -122,11 +122,21 @@ async def startup_event():
         logger.info("Bước 3: Thiết lập webhook...")
         webhook_url = f"https://{settings.render_domain}/webhook"
         await set_webhook_with_retry(app.telegram_app, webhook_url)
-        logger.info("Bước 3 hoàn tất: Webhook đã được thiết lập")
+        logger.info(f"Bước 3 hoàn tất: Webhook đã được thiết lập, URL={webhook_url}")
 
         logger.info("Bước 4: Khởi tạo FirestoreClient...")
         get_firestore_client()
         logger.info("Bước 4 hoàn tất: FirestoreClient đã được khởi tạo")
+
+        # Thêm log kiểm tra tài nguyên
+        try:
+            import psutil
+            memory = psutil.virtual_memory()
+            logger.info(f"RAM sử dụng: {memory.percent}% (tổng: {memory.total / 1024 / 1024}MB, còn lại: {memory.available / 1024 / 1024}MB)")
+            cpu = psutil.cpu_percent()
+            logger.info(f"CPU sử dụng: {cpu}%")
+        except Exception as e:
+            logger.warning(f"Không thể kiểm tra tài nguyên: {str(e)}")
     except TelegramError as e:
         logger.error(f"Lỗi Telegram trong startup_event: {str(e)}")
         app.initialized = False
@@ -166,4 +176,5 @@ async def shutdown_event():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    port = int(os.getenv("PORT", 10000))  # Sử dụng port từ môi trường, mặc định 8000
+    uvicorn.run(app, host="0.0.0.0", port=port)
