@@ -162,7 +162,7 @@ class FirestoreClient:
                 logger.info(f"Trả lời từ cache dữ liệu huấn luyện cho user {user_id}")
                 return self.training_cache[cache_key]
 
-            if user_id != "your_user_id_here":
+            if user_id != "7580364404":
                 return []
 
             relevant_data = self._filter_relevant_data(query, user_id)
