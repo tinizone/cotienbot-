@@ -1,21 +1,15 @@
+# File: /config/settings.py
 from pydantic_settings import BaseSettings
-from pydantic import validator
-import json
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
 
 class Settings(BaseSettings):
-    telegram_token: str
-    gemini_api_key: str
-    firestore_credentials: str
-    render_domain: str  # Ví dụ: your-service.onrender.com
-    admin_user_id: str  # Thêm admin_user_id để khắc phục lỗi AttributeError
-
-    @validator("firestore_credentials")
-    def validate_credentials(cls, v):
-        try:
-            json.loads(v)
-            return v
-        except json.JSONDecodeError:
-            raise ValueError("Invalid Firestore credentials JSON")
+    telegram_token: str = os.getenv("TELEGRAM_TOKEN", "")
+    render_domain: str = os.getenv("RENDER_DOMAIN", "")
+    firestore_credentials: str = os.getenv("FIRESTORE_CREDENTIALS", "{}")
+    gemini_api_key: str = os.getenv("GEMINI_API_KEY", "")
 
     class Config:
         env_file = ".env"
