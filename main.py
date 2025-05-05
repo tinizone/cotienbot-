@@ -15,7 +15,7 @@ from modules.learning.crawler import crawl_rss
 import logging
 import asyncio
 import html
-from tenacity import retry, stop_after_attempt, wait_fixed
+from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_type
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +25,10 @@ limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
 
 # Xử lý lỗi RateLimitExceeded
-async def _rate_limit_exceeded_handler(request: Request, exc: Rateapp.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+async def _rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
+    return HTTPException(status_code=429, detail="Rate limit exceeded")
+
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Lưu telegram_app như thuộc tính của app
 app.telegram_app = None
@@ -79,11 +82,15 @@ async def root():
     return {"message": "CotienBot đang chạy!"}
 
 # Retry logic cho set_webhook
-@retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
+@retry(stop=stop_after_attempt(3), wait=wait_fixed(2), retry=retry_if_exception_type(Exception))
 async def set_webhook_with_retry(telegram_app, webhook_url):
     logger.info(f"Thử thiết lập webhook tới {webhook_url}")
-    await telegram_app.bot.set_webhook(url=webhook_url)
-    logger.info(f"Đã thiết lập webhook thành công tới {webhook_url}")
+    try:
+        await telegram_app.bot.set_webhook(url=webhook_url)
+        logger.info(f"Đã thiết lập webhook thành công tới {webhook_url}")
+    except Exception as e:
+        logger.error(f"Lỗi khi thiết lập webhook: {str(e)}")
+        raise
 
 # Sự kiện khởi động
 @app.on_event("startup")
@@ -109,7 +116,7 @@ async def startup_event():
             db.set_admin(admin_user_id, "Admin")
             logger.info(f"Đã đặt {admin_user_id} làm admin khi khởi động.")
     except Exception as e:
-        logger.error(f"Lỗi trong startup_event: {str(e)}")
+        logger.error(f"Lỗi nghiêm trọng trong startup_event: {str(e)}")
         app.initialized = False
         raise
 
