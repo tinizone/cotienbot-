@@ -29,34 +29,42 @@ async def _rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded)
 
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-# Khởi tạo ứng dụng Telegram
+# Lưu telegram_app như thuộc tính của app
+app.telegram_app = None
+
 async def get_telegram_app():
-    app = Application.builder().token(settings.telegram_token).read_timeout(30).write_timeout(30).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("help", help_command))
-    app.add_handler(CommandHandler("train", train_command))
-    app.add_handler(CommandHandler("createquiz", create_quiz_command))
-    app.add_handler(CommandHandler("takequiz", take_quiz_command))
-    app.add_handler(CommandHandler("createcourse", create_course_command))
-    app.add_handler(CommandHandler("crawl", crawl_command))
-    app.add_handler(CommandHandler("listcourses", list_courses_command))
-    app.add_handler(CommandHandler("setadmin", set_admin_command))
-    app.add_handler(CommandHandler("getid", get_id_command))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    app.add_handler(MessageHandler(filters.PHOTO | filters.VIDEO | filters.AUDIO | filters.VOICE, handle_media))
-    return app
+    if app.telegram_app is None:
+        logger.info("Đang khởi tạo ứng dụng Telegram...")
+        app.telegram_app = Application.builder().token(settings.telegram_token).read_timeout(30).write_timeout(30).build()
+        app.telegram_app.add_handler(CommandHandler("start", start))
+        app.telegram_app.add_handler(CommandHandler("help", help_command))
+        app.telegram_app.add_handler(CommandHandler("train", train_command))
+        app.telegram_app.add_handler(CommandHandler("createquiz", create_quiz_command))
+        app.telegram_app.add_handler(CommandHandler("takequiz", take_quiz_command))
+        app.telegram_app.add_handler(CommandHandler("createcourse", create_course_command))
+        app.telegram_app.add_handler(CommandHandler("crawl", crawl_command))
+        app.telegram_app.add_handler(CommandHandler("listcourses", list_courses_command))
+        app.telegram_app.add_handler(CommandHandler("setadmin", set_admin_command))
+        app.telegram_app.add_handler(CommandHandler("getid", get_id_command))
+        app.telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+        app.telegram_app.add_handler(MessageHandler(filters.PHOTO | filters.VIDEO | filters.AUDIO | filters.VOICE, handle_media))
+        logger.info("Đã khởi tạo ứng dụng Telegram thành công")
+    return app.telegram_app
 
 # Route webhook cho Telegram
 @app.post("/webhook")
 @limiter.limit("10/minute")
 async def webhook(request: Request):
     try:
-        telegram_app = await get_telegram_app()
-        update = Update.de_json(await request.json(), telegram_app.bot)
+        if app.telegram_app is None:
+            logger.error("Ứng dụng Telegram chưa được khởi tạo")
+            raise HTTPException(status_code=500, detail="Ứng dụng chưa khởi tạo")
+        update = Update.de_json(await request.json(), app.telegram_app.bot)
         if update is None:
             logger.error("Nhận được cập nhật không hợp lệ từ Telegram")
             raise HTTPException(status_code=400, detail="Cập nhật không hợp lệ")
-        await telegram_app.process_update(update)
+        await app.telegram_app.process_update(update)
+        logger.info("Xử lý webhook thành công")
         return {"status": "ok"}
     except RateLimitExceeded:
         raise
@@ -74,13 +82,15 @@ async def root():
 # Sự kiện khởi động
 @app.on_event("startup")
 async def startup_event():
-    telegram_app = await get_telegram_app()
-    await telegram_app.initialize()
+    logger.info("Bắt đầu sự kiện khởi động...")
+    global app
+    await get_telegram_app()
+    await app.telegram_app.initialize()
     logger.info("Đã khởi tạo ứng dụng Telegram")
     webhook_url = f"https://{settings.render_domain}/webhook"
     logger.info(f"Đang thiết lập webhook tới {webhook_url}")
     try:
-        await telegram_app.bot.set_webhook(url=webhook_url)
+        await app.telegram_app.bot.set_webhook(url=webhook_url)
         logger.info(f"Đã thiết lập webhook thành công tới {webhook_url}")
     except Exception as e:
         logger.error(f"Lỗi khi thiết lập webhook: {e}")
@@ -95,10 +105,10 @@ async def startup_event():
 # Sự kiện tắt
 @app.on_event("shutdown")
 async def shutdown_event():
-    telegram_app = await get_telegram_app()
-    await telegram_app.bot.delete_webhook()
-    await telegram_app.shutdown()
-    logger.info("Đã xóa webhook và tắt ứng dụng")
+    if app.telegram_app:
+        await app.telegram_app.bot.delete_webhook()
+        await app.telegram_app.shutdown()
+        logger.info("Đã xóa webhook và tắt ứng dụng")
 
 if __name__ == "__main__":
     import uvicorn
