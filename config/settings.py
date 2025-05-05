@@ -1,5 +1,4 @@
-# File: /config/settings.py
-from pydantic_settings import BaseSettings  # Sửa import
+from pydantic_settings import BaseSettings
 from pydantic import validator
 import json
 
@@ -8,6 +7,7 @@ class Settings(BaseSettings):
     gemini_api_key: str
     firestore_credentials: str
     render_domain: str  # Ví dụ: your-service.onrender.com
+    admin_user_id: str  # Thêm admin_user_id để khắc phục lỗi AttributeError
 
     @validator("firestore_credentials")
     def validate_credentials(cls, v):
