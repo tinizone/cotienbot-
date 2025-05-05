@@ -1,15 +1,11 @@
-# File: /config/settings.py
+# config/settings.py
 from pydantic_settings import BaseSettings
-from dotenv import load_dotenv
-import os
-
-load_dotenv()
 
 class Settings(BaseSettings):
-    telegram_token: str = os.getenv("TELEGRAM_TOKEN", "")
-    render_domain: str = os.getenv("RENDER_DOMAIN", "")
-    firestore_credentials: str = os.getenv("FIRESTORE_CREDENTIALS", "{}")
-    gemini_api_key: str = os.getenv("GEMINI_API_KEY", "")
+    telegram_token: str
+    gemini_api_key: str
+    firestore_credentials: str
+    render_domain: str
 
     class Config:
         env_file = ".env"
