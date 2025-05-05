@@ -27,15 +27,19 @@ class FirestoreClient:
         self.training_cache = {}
         self.similar_chat_cache = {}
         self.embedding_cache = {}
-        self.chat_history_cache = {}  # Cache lịch sử trò chuyện
-        self.training_data_cache = {}  # Cache dữ liệu huấn luyện
+        self.chat_history_cache = {}
+        self.training_data_cache = {}
         logger.info("Hoàn tất khởi tạo FirestoreClient (trong __init__)")
 
     def _load_model(self):
         if self._model is None:
             logger.info("Đang tải mô hình Sentence Transformers...")
             from sentence_transformers import SentenceTransformer
-            self._model = SentenceTransformer("all-MiniLM-L2-v2")  # Nhẹ hơn L6
+            from tenacity import retry, stop_after_attempt, wait_fixed
+            @retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
+            def load_with_retry():
+                return SentenceTransformer("sentence-transformers/all-MiniLM-L12-v2")
+            self._model = load_with_retry()
         return self._model
 
     def _get_embedding(self, text: str) -> list:
