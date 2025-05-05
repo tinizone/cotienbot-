@@ -92,11 +92,34 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
             logger.warning(f"Đã đạt giới hạn Gemini API cho user {user_id}")
             return
 
-        # Gọi Gemini nếu không tìm thấy dữ liệu
+        # Kiểm tra cache Gemini
+        gemini_cache_key = f"{user_id}:{message}"
+        if hasattr(db, "gemini_cache") and gemini_cache_key in db.gemini_cache:
+            response = db.gemini_cache[gemini_cache_key]
+            await update.message.reply_text(f"[Gemini] {response}")
+            logger.info(f"Trả lời từ cache Gemini cho user {user_id}: {response}")
+            return
+
+        # Lấy ngữ cảnh từ lịch sử trò chuyện gần đây
+        doc = db.client.collection("chat_history").document(user_id).get()
+        context_messages = []
+        if doc.exists:
+            chats = doc.to_dict().get("chats", [])
+            context_messages = [f"User: {chat['message']}\nBot: {chat['response']}" for chat in chats[-3:]]
+        context_str = "\n".join(context_messages)
+
+        # Gọi Gemini với ngữ cảnh
         logger.info(f"Không tìm thấy dữ liệu huấn luyện, gọi Gemini cho user {user_id}")
         gemini_model = get_gemini_model()
-        response = gemini_model.generate_content(message).text
+        prompt = f"Ngữ cảnh:\n{context_str}\n\nCâu hỏi: {message}"
+        response = gemini_model.generate_content(prompt).text
         gemini_call_count += 1
+
+        # Cache kết quả Gemini
+        if not hasattr(db, "gemini_cache"):
+            db.gemini_cache = {}
+        db.gemini_cache[gemini_cache_key] = response
+
         await update.message.reply_text(f"[Gemini] {response}")
         db.save_chat(user_id, message, response, is_gemini=True)
         logger.info(f"Trả lời từ Gemini cho user {user_id}: {response}")
