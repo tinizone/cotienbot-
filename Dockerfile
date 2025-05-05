@@ -15,11 +15,11 @@ RUN pip install --upgrade pip
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Sao chép mã nguồn (bao gồm main.py ở root)
+# Sao chép mã nguồn
 COPY . .
 
-# Expose cổng mặc định của Render
-EXPOSE $PORT
+# Expose cổng mặc định của Render (dùng 10000 làm giá trị tượng trưng)
+EXPOSE 10000
 
-# Chạy ứng dụng với uvicorn, sử dụng main.py
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "$PORT"]
+# Chạy ứng dụng với uvicorn, dùng shell form để biến $PORT được thay thế
+CMD uvicorn app.main:app --host 0.0.0.0 --port $PORT
