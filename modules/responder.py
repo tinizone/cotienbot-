@@ -5,7 +5,12 @@ import os
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+import logging
 from modules.storage import save_to_chat_history
+
+# Thiết lập logging
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logger = logging.getLogger(__name__)
 
 def generate_response(user_id, query, data):
     """Tạo phản hồi dựa trên dữ liệu hoặc Gemini-2.0-Flash."""
@@ -13,14 +18,23 @@ def generate_response(user_id, query, data):
         if data:
             response = f"Dựa trên thông tin bạn cung cấp: {data['content'][:200]}..."
             save_to_chat_history(user_id, query, response)
+            logger.info(f"Generated response from Firestore for user {user_id}")
             return response
         
         # Debug: Kiểm tra kết nối mạng
         try:
             test_response = requests.get("https://www.google.com", timeout=5)
-            print(f"Debug: Test connection to Google: {test_response.status_code}")
+            logger.info(f"Test connection to Google: {test_response.status_code}")
         except Exception as e:
-            print(f"Debug: Test connection error: {str(e)}")
+            logger.error(f"Test connection error: {str(e)}")
+
+        # Kiểm tra GEMINI_API_KEY
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            logger.error("GEMINI_API_KEY is not set")
+            error_msg = "Lỗi: Không tìm thấy API key cho Gemini."
+            save_to_chat_history(user_id, query, error_msg)
+            return error_msg
 
         # Cấu hình retry cho requests
         session = requests.Session()
@@ -28,11 +42,8 @@ def generate_response(user_id, query, data):
         session.mount("https://", HTTPAdapter(max_retries=retries))
 
         # Gọi Gemini-2.0-Flash API
-        gemini_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
-        headers = {
-            "Authorization": f"Bearer {os.getenv('GEMINI_API_KEY')}",
-            "Content-Type": "application/json"
-        }
+        gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+        headers = {"Content-Type": "application/json"}
         payload = {
             "contents": [{
                 "parts": [{
@@ -44,9 +55,9 @@ def generate_response(user_id, query, data):
             }
         }
         
-        print(f"Debug: Sending Gemini request: {payload}")
+        logger.info(f"Sending Gemini request: {payload}")
         response = session.post(gemini_url, json=payload, headers=headers, timeout=5)
-        print(f"Debug: Gemini response status: {response.status_code}, body: {response.text}")
+        logger.info(f"Gemini response status: {response.status_code}, body: {response.text}")
 
         if response.status_code == 200:
             text = response.json().get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "Không có phản hồi từ Gemini.")
@@ -55,11 +66,12 @@ def generate_response(user_id, query, data):
             return full_response
         
         error_msg = f"Lỗi Gemini API: {response.status_code} - {response.text}"
+        logger.error(error_msg)
         save_to_chat_history(user_id, query, error_msg)
         return "Hệ thống AI tạm thời không khả dụng, vui lòng thử lại sau."
 
     except requests.exceptions.RequestException as e:
         error_msg = f"Hệ thống AI tạm thời không khả dụng do lỗi mạng: {str(e)}"
-        print(f"Debug: Gemini error: {str(e)}")
+        logger.error(f"Gemini error: {str(e)}")
         save_to_chat_history(user_id, query, error_msg)
         return error_msg
