@@ -5,20 +5,26 @@ import os
 import json
 import logging
 from google.oauth2.service_account import Credentials
+from google.cloud import firestore
 
 # Thiết lập logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
 def _initialize_firestore():
-    """Khởi tạo Firestore client với credentials."""
+    """Khởi tạo Firestore credentials."""
     try:
+        # Kiểm tra biến môi trường trước
+        logger.info("Checking Firestore credentials configuration")
+        if not os.getenv("FIREBASE_CREDENTIALS") and not os.getenv("FIRESTORE_PROJECT_ID") and not os.path.exists(os.path.join(os.path.dirname(__file__), "../credentials.json")):
+            raise ValueError("No Firestore credentials provided (FIREBASE_CREDENTIALS, FIRESTORE_PROJECT_ID, or credentials.json missing)")
+
         # Cách 1: Dùng file credentials.json (cho local hoặc Render.com nếu có file)
         credentials_path = os.path.join(os.path.dirname(__file__), "../credentials.json")
         if os.path.exists(credentials_path):
             credentials = Credentials.from_service_account_file(credentials_path)
             logger.info("Initialized Firestore with credentials.json")
-            return Credentials.from_service_account_file(credentials_path)
+            return credentials
 
         # Cách 2: Dùng biến môi trường FIREBASE_CREDENTIALS (cho Render.com)
         credentials_json = os.getenv("FIREBASE_CREDENTIALS")
@@ -32,7 +38,6 @@ def _initialize_firestore():
         project_id = os.getenv("FIRESTORE_PROJECT_ID")
         if project_id:
             logger.info(f"Initialized Firestore with project_id: {project_id}")
-            from google.cloud import firestore
             return firestore.Client(project=project_id)
 
         raise ValueError("Không tìm thấy credentials hoặc project_id để khởi tạo Firestore.")
@@ -43,8 +48,9 @@ def _initialize_firestore():
 
 def _get_firestore_client():
     """Lấy Firestore client, khởi tạo nếu chưa có."""
-    from google.cloud import firestore
     credentials = _initialize_firestore()
+    if isinstance(credentials, firestore.Client):
+        return credentials
     return firestore.Client(credentials=credentials)
 
 def save_to_firestore(user_id, data):
