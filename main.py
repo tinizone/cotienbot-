@@ -11,29 +11,23 @@ from modules.responder import generate_response
 from utils.cleaner import clean_input
 import time
 
-# Thiết lập logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 bot = telegram.Bot(token=os.getenv("TELEGRAM_TOKEN"))
 
-# Giới hạn bộ nhớ tin nhắn đã xử lý
 MAX_PROCESSED = 1000
-processed_messages = deque(maxlen=MAX_PROCESSED)  # chứa các cặp (chat_id, message_id)
+processed_messages = deque(maxlen=MAX_PROCESSED)
 
 def set_webhook():
-    """Tự động cài đặt webhook khi server khởi động."""
     telegram_token = os.getenv("TELEGRAM_TOKEN")
     webhook_url = os.getenv("WEBHOOK_URL")
-    
     if not webhook_url:
         logger.error("WEBHOOK_URL environment variable is not set")
         return
-    
     url = f"https://api.telegram.org/bot{telegram_token}/setWebhook"
     payload = {"url": webhook_url}
-    
     try:
         response = requests.post(url, json=payload)
         if response.status_code == 200:
@@ -97,7 +91,12 @@ def webhook():
             return "OK", 200
 
         # Xử lý lệnh huấn luyện hoặc phản hồi
-        if text.startswith("/train"):
+        if text.startswith("/train") or text.lower().startswith("train"):
+            text = text.strip()
+            if not text.startswith("/"):
+                text = "/" + text
+            text = text.replace("text ", "text=").replace("url ", "url=")
+            logger.debug(f"Chuẩn hóa lệnh: {text}")
             response = handle_train(chat_id, text)
         else:
             data = retrieve_data(chat_id, text)
@@ -116,7 +115,6 @@ def health():
     return "OK", 200
 
 def send_with_retry(chat_id, text, retries=3, delay=1):
-    """Gửi tin nhắn với retry nếu gặp lỗi tạm thời."""
     for attempt in range(retries):
         try:
             bot.send_message(chat_id=chat_id, text=text)
@@ -133,10 +131,7 @@ def handle_shutdown(signum, frame):
 if __name__ == "__main__":
     signal.signal(signal.SIGTERM, handle_shutdown)
     signal.signal(signal.SIGINT, handle_shutdown)
-    
-    # Tự động cài đặt webhook khi server khởi động
     set_webhook()
-    
     port = int(os.getenv("PORT", 10000))
     logger.info(f"Starting server on port {port}")
     app.run(host="0.0.0.0", port=port)
