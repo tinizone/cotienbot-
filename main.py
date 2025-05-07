@@ -6,10 +6,14 @@ import telegram
 import os
 import logging
 import signal
-from modules.trainer import handle_train
-from modules.retriever import retrieve_data
-from modules.responder import generate_response
-from utils.cleaner import clean_input
+
+# Trì hoãn import các module khác để tránh circular import
+def import_modules():
+    global handle_train, retrieve_data, generate_response, clean_input
+    from modules.trainer import handle_train
+    from modules.retriever import retrieve_data
+    from modules.responder import generate_response
+    from utils.cleaner import clean_input
 
 # Thiết lập logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -17,6 +21,9 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 bot = telegram.Bot(token=os.getenv("TELEGRAM_TOKEN"))
+
+# Import modules khi cần
+import_modules()
 
 @app.route("/", methods=["GET"])
 def home():
