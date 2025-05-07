@@ -1,4 +1,4 @@
-# responder py
+# responder.py
 import os
 import requests
 from requests.adapters import HTTPAdapter
@@ -14,8 +14,8 @@ def generate_response(user_id, query, data):
     try:
         # Xử lý dữ liệu huấn luyện
         if data:
-            content = data.get("content", "")
-            response = f"Dựa trên thông tin bạn cung cấp: {content[:200]}..."
+            # Trả về dữ liệu huấn luyện nếu tìm thấy bản ghi liên quan
+            response = f"Dựa trên thông tin bạn cung cấp: {data['content'][:200]}..."
             save_to_chat_history(user_id, query, response)
             logger.info(f"Generated response from Firestore for user {user_id}")
             return response
@@ -35,7 +35,7 @@ def generate_response(user_id, query, data):
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key:
             logger.error("GEMINI_API_KEY is not set")
-            response = "Tôi chưa có đủ thông tin để trả lời câu hỏi này. Bạn có thể dùng /train text=... hoặc /train url=... để dạy tôi nhé! Ví dụ: /train text=Tôi tên Vinh."
+            response = "Tôi chưa có đủ thông tin để trả lời câu hỏi này. Bạn có thể dùng /train text=... hoặc /train url=... để dạy tôi nhé! Ví dụ: /train text=Nha Trang có nhiều bãi biển đẹp."
             save_to_chat_history(user_id, query, response)
             logger.info(f"Sent default response for user {user_id} due to missing API key")
             return response
