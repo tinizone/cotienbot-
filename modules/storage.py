@@ -54,15 +54,23 @@ def _get_firestore_client():
 def save_to_firestore(user_id, data):
     """Lưu dữ liệu huấn luyện vào Firestore."""
     try:
+        if not user_id or not isinstance(user_id, str):
+            logger.error(f"User ID không hợp lệ: {user_id}")
+            raise ValueError("User ID không hợp lệ")
+        if not data or not isinstance(data, dict):
+            logger.error(f"Dữ liệu không hợp lệ cho user {user_id}: {data}")
+            raise ValueError("Dữ liệu không hợp lệ")
+
         db = _get_firestore_client()
         data_with_timestamp = {
             **data,
             "timestamp": firestore.SERVER_TIMESTAMP
         }
-        db.collection("users").document(str(user_id)).collection("trained_data").add(data_with_timestamp)
-        logger.info(f"Đã lưu dữ liệu huấn luyện cho user {user_id}")
+        logger.debug(f"Dữ liệu sẽ lưu cho user {user_id}: {data_with_timestamp}")
+        doc_ref = db.collection("users").document(str(user_id)).collection("trained_data").add(data_with_timestamp)
+        logger.info(f"Đã lưu dữ liệu huấn luyện cho user {user_id}, doc_id: {doc_ref[1].id}")
     except Exception as e:
-        logger.error(f"Lỗi khi lưu dữ liệu user {user_id}: {str(e)}")
+        logger.error(f"Lỗi khi lưu dữ liệu user {user_id}: {str(e)}", exc_info=True)
         raise
 
 def save_to_chat_history(user_id, query, response):
