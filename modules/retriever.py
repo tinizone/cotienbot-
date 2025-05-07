@@ -1,5 +1,4 @@
-# Đường dẫn: cotienbot/modules/retriever.py
-# Tên file: retriever.py
+# retriever.py
 from modules.storage import get_user_data
 from utils.cleaner import clean_input
 from sentence_transformers import SentenceTransformer, util
