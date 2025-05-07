@@ -3,12 +3,13 @@ from modules.storage import get_user_data
 from utils.cleaner import clean_input
 from sentence_transformers import SentenceTransformer, util
 import logging
+import numpy as np
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
-# Khởi tạo mô hình SentenceTransformer
-model = SentenceTransformer('all-MiniLM-L6-v2')
+# Khởi tạo mô hình nhẹ
+model = SentenceTransformer('paraphrase-MiniLM-L3-v2')
 
 def retrieve_data(user_id, query):
     """Tìm dữ liệu huấn luyện phù hợp với câu hỏi bằng semantic search."""
@@ -21,15 +22,17 @@ def retrieve_data(user_id, query):
             return None
         
         # Nhúng câu hỏi
-        query_embedding = model.encode(cleaned_query, convert_to_tensor=True)
+        query_embedding = model.encode(cleaned_query, convert_to_tensor=False)
         
         best_match = None
         best_score = -1  # Cosine similarity từ -1 đến 1
         
         # Tìm bản ghi có mức độ tương đồng cao nhất
         for item in data:
-            content = item.get("content", "")
-            content_embedding = model.encode(content, convert_to_tensor=True)
+            embedding = item.get("embedding", [])
+            if not embedding:
+                continue  # Bỏ qua nếu không có embedding
+            content_embedding = np.array(embedding)
             score = util.cos_sim(query_embedding, content_embedding).item()
             
             if score > best_score:
