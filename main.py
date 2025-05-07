@@ -7,23 +7,42 @@ import os
 import logging
 import signal
 
-# Trì hoãn import các module khác để tránh circular import
-def import_modules():
-    global handle_train, retrieve_data, generate_response, clean_input
-    from modules.trainer import handle_train
-    from modules.retriever import retrieve_data
-    from modules.responder import generate_response
-    from utils.cleaner import clean_input
-
 # Thiết lập logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
-app = Flask(__name__)
-bot = telegram.Bot(token=os.getenv("TELEGRAM_TOKEN"))
+# Trì hoãn import các module khác để tránh circular import
+def import_modules():
+    global handle_train, retrieve_data, generate_response, clean_input
+    try:
+        from modules.trainer import handle_train
+        from modules.retriever import retrieve_data
+        from modules.responder import generate_response
+        from utils.cleaner import clean_input
+        logger.info("Successfully imported all modules")
+    except Exception as e:
+        logger.error(f"Failed to import modules: {str(e)}")
+        raise
 
-# Import modules khi cần
-import_modules()
+app = Flask(__name__)
+
+# Kiểm tra và khởi tạo Telegram Bot
+try:
+    telegram_token = os.getenv("TELEGRAM_TOKEN")
+    if not telegram_token:
+        raise ValueError("TELEGRAM_TOKEN is not set in environment variables")
+    bot = telegram.Bot(token=telegram_token)
+    logger.info("Successfully initialized Telegram Bot")
+except Exception as e:
+    logger.error(f"Failed to initialize Telegram Bot: {str(e)}")
+    raise
+
+# Import modules sau khi khởi tạo bot
+try:
+    import_modules()
+except Exception as e:
+    logger.error(f"Module import error: {str(e)}")
+    raise
 
 @app.route("/", methods=["GET"])
 def home():
@@ -41,6 +60,7 @@ def webhook_get():
 def webhook():
     """Xử lý tin nhắn từ Telegram qua webhook."""
     try:
+        logger.info("Received webhook request")
         update = telegram.Update.de_json(request.get_json(force=True), bot)
         if not update.message:
             logger.info("Received empty message")
@@ -75,8 +95,10 @@ def webhook():
             return "OK", 200
 
         # Xử lý hội thoại thông thường
+        logger.info(f"Retrieving data for user {chat_id}")
         data = retrieve_data(chat_id, text)
         if not data and not text.startswith("/"):
+            logger.info(f"No data found, generating response for user {chat_id}")
             response = generate_response(chat_id, text, data)
             # Gợi ý huấn luyện nếu không có dữ liệu
             if response.startswith("[Gemini]"):
@@ -84,13 +106,15 @@ def webhook():
         else:
             response = generate_response(chat_id, text, data)
 
+        logger.info(f"Sending response to {chat_id}")
         bot.send_message(chat_id=chat_id, text=response)
         logger.info(f"Sent response to {chat_id}: {response}")
         return "OK", 200
 
     except Exception as e:
         logger.error(f"Webhook error: {str(e)}")
-        bot.send_message(chat_id=chat_id, text="Đã xảy ra lỗi, vui lòng thử lại sau.")
+        if 'chat_id' in locals():
+            bot.send_message(chat_id=chat_id, text="Đã xảy ra lỗi, vui lòng thử lại sau.")
         return "Error", 500
 
 @app.route("/health", methods=["GET"])
