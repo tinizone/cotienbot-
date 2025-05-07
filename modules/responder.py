@@ -12,36 +12,15 @@ logger = logging.getLogger(__name__)
 def generate_response(user_id, query, data):
     """Tạo phản hồi dựa trên dữ liệu huấn luyện hoặc Gemini-1.5-Flash."""
     try:
-        query_lower = query.lower()
-        
         # Xử lý dữ liệu huấn luyện
         if data:
-            content = data.get("content", "").lower()
-            
-            # Xử lý câu hỏi về tên
-            if "tên" in query_lower and "tên" in content:
-                if content.startswith(("tôi tên", "bạn tôi tên", "tên tôi là")):
-                    name = content.split("tên")[-1].split(",")[0].strip()
-                    response = f"Bạn tên là {name}!"
-                    save_to_chat_history(user_id, query, response)
-                    logger.info(f"Generated name response for user {user_id}: {response}")
-                    return response
-                
-            # Xử lý câu hỏi về nơi ở
-            if "ở đâu" in query_lower and "sống ở" in content:
-                location = content.split("sống ở")[-1].strip()
-                response = f"Bạn sống ở {location}!"
-                save_to_chat_history(user_id, query, response)
-                logger.info(f"Generated location response for user {user_id}: {response}")
-                return response
-                
-            # Trả về dữ liệu huấn luyện nếu liên quan
-            response = f"Dựa trên thông tin bạn cung cấp: {data['content'][:200]}..."
+            content = data.get("content", "")
+            response = f"Dựa trên thông tin bạn cung cấp: {content[:200]}..."
             save_to_chat_history(user_id, query, response)
             logger.info(f"Generated response from Firestore for user {user_id}")
             return response
 
-        # Nếu không có dữ liệu hoặc dữ liệu không liên quan, gọi Gemini
+        # Nếu không có dữ liệu liên quan, gọi Gemini
         # Kiểm tra kết nối mạng
         try:
             test_response = requests.get("https://www.google.com", timeout=5)
