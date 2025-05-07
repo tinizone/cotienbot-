@@ -1,3 +1,4 @@
+# storage.py
 import os
 import json
 import logging
@@ -79,8 +80,7 @@ def get_user_data(user_id):
     try:
         user_id = str(user_id)
         db = _get_firestore_client()
-        docs = db.collection("users").document(user_id).collection("trained_data") \
-                 .order_by("timestamp", direction=firestore.Query.DESCENDING).limit(10).stream()
+        docs = db.collection("users").document(user_id).collection("trained_data").stream()  # Lấy tất cả bản ghi
         data = [doc.to_dict() for doc in docs]
         logger.info(f"Lấy {len(data)} bản ghi từ Firestore cho user {user_id}")
         return data
