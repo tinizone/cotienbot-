@@ -1,6 +1,3 @@
-# Đường dẫn: cotienbot/modules/responder.py
-# Tên file: responder.py
-
 import os
 import requests
 from requests.adapters import HTTPAdapter
@@ -16,6 +13,7 @@ def generate_response(user_id, query, data):
     """Tạo phản hồi dựa trên dữ liệu hoặc Gemini-1.5-Flash."""
     try:
         if data:
+            # Trả lời dựa trên dữ liệu huấn luyện có sẵn
             response = f"Dựa trên thông tin bạn cung cấp: {data['content'][:200]}..."
             save_to_chat_history(user_id, query, response)
             logger.info(f"Generated response from Firestore for user {user_id}")
@@ -28,12 +26,15 @@ def generate_response(user_id, query, data):
             logger.info(f"Sent default response for user {user_id} due to no training data")
             return response
 
-        # Debug: Kiểm tra kết nối mạng
+        # Kiểm tra kết nối mạng
         try:
             test_response = requests.get("https://www.google.com", timeout=5)
             logger.info(f"Test connection to Google: {test_response.status_code}")
-        except Exception as e:
-            logger.error(f"Test connection error: {str(e)}")
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Network error: {str(e)}")
+            error_msg = "Không thể kết nối đến mạng. Vui lòng kiểm tra kết nối của bạn."
+            save_to_chat_history(user_id, query, error_msg)
+            return error_msg
 
         # Kiểm tra GEMINI_API_KEY
         api_key = os.getenv("GEMINI_API_KEY")
