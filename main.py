@@ -8,6 +8,7 @@ from collections import deque
 from modules.trainer import handle_train
 from modules.retriever import retrieve_data
 from modules.responder import generate_response
+from modules.auth import authenticate_user, check_authentication
 from utils.cleaner import clean_input
 import time
 
@@ -67,10 +68,12 @@ def webhook():
             return "OK", 200
         processed_messages.append(message_key)
 
+        # Lệnh không yêu cầu xác thực
         if text == "/start":
             response = (
-                "Chào mừng bạn đến với Cotienbot! Dùng /train text=... hoặc /train url=... để huấn luyện bot. "
-                "Gửi câu hỏi bất kỳ để nhận phản hồi."
+                "Chào mừng bạn đến với Cotienbot! Dùng /auth <mật_khẩu> để xác thực. "
+                "Sau khi xác thực, dùng /train text=... hoặc /train url=... để huấn luyện bot, "
+                "hoặc gửi câu hỏi bất kỳ để nhận phản hồi."
             )
             send_with_retry(chat_id, response)
             return "OK", 200
@@ -78,19 +81,38 @@ def webhook():
         if text == "/help":
             response = (
                 "Hướng dẫn sử dụng Cotienbot:\n"
+                "- /auth <mật_khẩu>: Xác thực để sử dụng bot.\n"
                 "- /train text=...: Huấn luyện bot với văn bản.\n"
                 "- /train url=...: Huấn luyện bot với nội dung từ URL.\n"
-                "- Gửi câu hỏi để nhận phản hồi."
+                "- Gửi câu hỏi để nhận phản hồi.\n"
+                "Lưu ý: Bạn cần xác thực trước khi sử dụng các lệnh ngoài /start và /help."
             )
             send_with_retry(chat_id, response)
             return "OK", 200
 
+        if text.startswith("/auth"):
+            parts = text.split(" ", 1)
+            if len(parts) < 2:
+                response = "Vui lòng cung cấp mật khẩu: /auth <mật_khẩu>"
+                send_with_retry(chat_id, response)
+                return "OK", 200
+            password = parts[1]
+            success, message = authenticate_user(chat_id, password)
+            send_with_retry(chat_id, message)
+            return "OK", 200
+
+        # Kiểm tra xác thực cho các lệnh và câu hỏi khác
+        if not check_authentication(chat_id):
+            response = "Bạn cần xác thực trước! Dùng /auth <mật_khẩu>."
+            send_with_retry(chat_id, response)
+            return "OK", 200
+
+        # Xử lý các lệnh và câu hỏi yêu cầu xác thực
         if text.lower() in ["hi", "hello", "chào", "xin chào"]:
             response = "Chào bạn! Bạn khỏe không? Gửi câu hỏi hoặc dùng /train để huấn luyện bot nhé!"
             send_with_retry(chat_id, response)
             return "OK", 200
 
-        # Xử lý lệnh huấn luyện hoặc phản hồi
         if text.startswith("/train") or text.lower().startswith("train"):
             text = text.strip()
             if not text.startswith("/"):
