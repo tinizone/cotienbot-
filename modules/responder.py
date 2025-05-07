@@ -1,3 +1,4 @@
+# responder.py
 import os
 import requests
 from requests.adapters import HTTPAdapter
@@ -5,27 +6,40 @@ from urllib3.util.retry import Retry
 import logging
 from modules.storage import save_to_chat_history
 
-# Thiết lập logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
 def generate_response(user_id, query, data):
-    """Tạo phản hồi dựa trên dữ liệu hoặc Gemini-1.5-Flash."""
+    """Tạo phản hồi dựa trên dữ liệu huấn luyện hoặc Gemini-1.5-Flash."""
     try:
-        if data:
-            # Trả lời dựa trên dữ liệu huấn luyện có sẵn
-            response = f"Dựa trên thông tin bạn cung cấp: {data['content'][:200]}..."
-            save_to_chat_history(user_id, query, response)
-            logger.info(f"Generated response from Firestore for user {user_id}")
-            return response
+        query_lower = query.lower()
         
-        # Phản hồi mặc định nếu chưa có dữ liệu huấn luyện
-        if not data:
-            response = "Hiện tại tôi chưa có dữ liệu huấn luyện. Dùng /train text=... hoặc /train url=... để cung cấp thông tin nhé!"
-            save_to_chat_history(user_id, query, response)
-            logger.info(f"Sent default response for user {user_id} due to no training data")
-            return response
+        # Xử lý dữ liệu huấn luyện
+        if data:
+            content = data.get("content", "").lower()
+            
+            # Kiểm tra mức độ liên quan
+            query_words = query_lower.split()
+            content_words = content.split()
+            common_words = set(query_words) & set(content_words)
+            is_relevant = len(common_words) > 0  # Có ít nhất 1 từ khóa chung
+            
+            if is_relevant:
+                # Xử lý câu hỏi về tên
+                if "tên" in query_lower and "tên" in content:
+                    name = content.split("tên")[-1].strip()
+                    response = f"Bạn tên là {name}!"
+                    save_to_chat_history(user_id, query, response)
+                    logger.info(f"Generated name response for user {user_id}: {response}")
+                    return response
+                
+                # Trả về dữ liệu huấn luyện nếu liên quan
+                response = f"Dựa trên thông tin bạn cung cấp: {data['content'][:200]}..."
+                save_to_chat_history(user_id, query, response)
+                logger.info(f"Generated response from Firestore for user {user_id}")
+                return response
 
+        # Nếu không có dữ liệu hoặc dữ liệu không liên quan, gọi Gemini
         # Kiểm tra kết nối mạng
         try:
             test_response = requests.get("https://www.google.com", timeout=5)
@@ -40,9 +54,10 @@ def generate_response(user_id, query, data):
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key:
             logger.error("GEMINI_API_KEY is not set")
-            error_msg = "Lỗi: Không tìm thấy API key cho Gemini."
-            save_to_chat_history(user_id, query, error_msg)
-            return error_msg
+            response = "Tôi chưa có đủ thông tin để trả lời câu hỏi này. Bạn có thể dùng /train text=... hoặc /train url=... để dạy tôi nhé! Ví dụ: /train text=Nha Trang có nhiều bãi biển đẹp."
+            save_to_chat_history(user_id, query, response)
+            logger.info(f"Sent default response for user {user_id} due to missing API key")
+            return response
 
         # Cấu hình retry cho requests
         session = requests.Session()
