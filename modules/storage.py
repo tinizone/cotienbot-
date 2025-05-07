@@ -1,66 +1,68 @@
-# Đường dẫn: cotienbot/modules/storage.py
-# Tên file: storage.py
-
 import os
 import json
 import logging
 from google.oauth2.service_account import Credentials
 from google.cloud import firestore
 
-# Thiết lập logging
+# Logging setup
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
-def _initialize_firestore():
-    """Khởi tạo Firestore credentials."""
-    try:
-        # Kiểm tra biến môi trường trước
-        logger.info("Checking Firestore credentials configuration")
-        if not os.getenv("FIREBASE_CREDENTIALS") and not os.getenv("FIRESTORE_PROJECT_ID") and not os.path.exists(os.path.join(os.path.dirname(__file__), "../credentials.json")):
-            raise ValueError("No Firestore credentials provided (FIREBASE_CREDENTIALS, FIRESTORE_PROJECT_ID, or credentials.json missing)")
+_firestore_client = None  # Cache client sau khi khởi tạo
 
-        # Cách 1: Dùng file credentials.json (cho local hoặc Render.com nếu có file)
+def _initialize_firestore():
+    """Khởi tạo Firestore credentials theo 3 ưu tiên: file, biến môi trường, project ID."""
+    try:
+        logger.info("Khởi tạo Firestore credentials...")
+
+        # Ưu tiên 1: credentials.json
         credentials_path = os.path.join(os.path.dirname(__file__), "../credentials.json")
         if os.path.exists(credentials_path):
-            credentials = Credentials.from_service_account_file(credentials_path)
-            logger.info("Initialized Firestore with credentials.json")
-            return credentials
+            logger.info("Sử dụng credentials từ file credentials.json")
+            return Credentials.from_service_account_file(credentials_path)
 
-        # Cách 2: Dùng biến môi trường FIREBASE_CREDENTIALS (cho Render.com)
+        # Ưu tiên 2: FIREBASE_CREDENTIALS (chuỗi JSON từ biến môi trường)
         credentials_json = os.getenv("FIREBASE_CREDENTIALS")
         if credentials_json:
+            logger.info("Sử dụng credentials từ biến môi trường FIREBASE_CREDENTIALS")
             credentials_dict = json.loads(credentials_json)
-            credentials = Credentials.from_service_account_info(credentials_dict)
-            logger.info("Initialized Firestore with FIREBASE_CREDENTIALS")
-            return credentials
+            return Credentials.from_service_account_info(credentials_dict)
 
-        # Fallback: Dùng project_id nếu không có credentials (cho môi trường tự xác thực)
+        # Ưu tiên 3: FIRESTORE_PROJECT_ID (chạy trên môi trường có IAM mặc định)
         project_id = os.getenv("FIRESTORE_PROJECT_ID")
         if project_id:
-            logger.info(f"Initialized Firestore with project_id: {project_id}")
+            logger.info(f"Sử dụng project_id: {project_id} với IAM mặc định")
             return firestore.Client(project=project_id)
 
-        raise ValueError("Không tìm thấy credentials hoặc project_id để khởi tạo Firestore.")
+        raise ValueError("Không có thông tin xác thực Firestore hợp lệ.")
 
     except Exception as e:
-        logger.error(f"Firestore initialization error: {str(e)}")
+        logger.error(f"Lỗi khởi tạo Firestore: {str(e)}")
         raise
 
 def _get_firestore_client():
-    """Lấy Firestore client, khởi tạo nếu chưa có."""
-    credentials = _initialize_firestore()
-    if isinstance(credentials, firestore.Client):
-        return credentials
-    return firestore.Client(credentials=credentials)
+    """Trả về Firestore client (có cache)."""
+    global _firestore_client
+    if _firestore_client is None:
+        credentials = _initialize_firestore()
+        if isinstance(credentials, firestore.Client):
+            _firestore_client = credentials
+        else:
+            _firestore_client = firestore.Client(credentials=credentials)
+    return _firestore_client
 
 def save_to_firestore(user_id, data):
     """Lưu dữ liệu huấn luyện vào Firestore."""
     try:
         db = _get_firestore_client()
-        db.collection("users").document(str(user_id)).collection("trained_data").add(data)
-        logger.info(f"Saved data to Firestore for user {user_id}")
+        data_with_timestamp = {
+            **data,
+            "timestamp": firestore.SERVER_TIMESTAMP
+        }
+        db.collection("users").document(str(user_id)).collection("trained_data").add(data_with_timestamp)
+        logger.info(f"Đã lưu dữ liệu huấn luyện cho user {user_id}")
     except Exception as e:
-        logger.error(f"Firestore save error for user {user_id}: {str(e)}")
+        logger.error(f"Lỗi khi lưu dữ liệu user {user_id}: {str(e)}")
         raise
 
 def save_to_chat_history(user_id, query, response):
@@ -72,19 +74,20 @@ def save_to_chat_history(user_id, query, response):
             "bot_response": response,
             "timestamp": firestore.SERVER_TIMESTAMP
         })
-        logger.info(f"Saved chat history for user {user_id}")
+        logger.info(f"Đã lưu lịch sử chat cho user {user_id}")
     except Exception as e:
-        logger.error(f"Chat history save error for user {user_id}: {str(e)}")
+        logger.error(f"Lỗi khi lưu lịch sử chat user {user_id}: {str(e)}")
         raise
 
 def get_user_data(user_id):
-    """Lấy dữ liệu huấn luyện của người dùng."""
+    """Lấy dữ liệu huấn luyện gần nhất của người dùng (tối đa 10 bản ghi)."""
     try:
         db = _get_firestore_client()
-        docs = db.collection("users").document(str(user_id)).collection("trained_data").order_by("timestamp", direction=firestore.Query.DESCENDING).limit(10).stream()
+        docs = db.collection("users").document(str(user_id)).collection("trained_data") \
+                 .order_by("timestamp", direction=firestore.Query.DESCENDING).limit(10).stream()
         data = [doc.to_dict() for doc in docs]
-        logger.info(f"Retrieved {len(data)} records for user {user_id}")
+        logger.info(f"Lấy {len(data)} bản ghi từ Firestore cho user {user_id}")
         return data
     except Exception as e:
-        logger.error(f"Firestore retrieve error for user {user_id}: {str(e)}")
+        logger.error(f"Lỗi khi lấy dữ liệu user {user_id}: {str(e)}")
         return []
