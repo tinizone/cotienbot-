@@ -50,7 +50,7 @@ def webhook():
             logger.info(f"Sent /start response to {chat_id}")
             return "OK", 200
 
-        # Xử lý lệnh /help (tùy chọn)
+        # Xử lý lệnh /help
         if text == "/help":
             response = "Hướng dẫn sử dụng Cotienbot:\n- /train text=...: Huấn luyện bot với văn bản.\n- /train url=...: Huấn luyện bot với nội dung từ URL.\n- Gửi câu hỏi để nhận phản hồi."
             bot.send_message(chat_id=chat_id, text=response)
@@ -59,17 +59,31 @@ def webhook():
 
         # Xử lý lệnh /train
         if text.startswith("/train"):
-            response = handle_train(chat_id, text)
+            if "text=" in text or "url=" in text:
+                response = handle_train(chat_id, text)
+            else:
+                response = "Sai cú pháp. Vui lòng dùng /train text=... hoặc /train url=.... Ví dụ: /train text=Tôi tên Vinh"
+                logger.info(f"Invalid /train syntax from {chat_id}: {text}")
+            bot.send_message(chat_id=chat_id, text=response)
+            return "OK", 200
+
+        # Xử lý hội thoại thông thường
+        data = retrieve_data(chat_id, text)
+        if not data and not text.startswith("/"):
+            response = generate_response(chat_id, text, data)
+            # Gợi ý huấn luyện nếu không có dữ liệu
+            if response.startswith("[Gemini]"):
+                response += "\n(Hiện tại tôi chưa có dữ liệu huấn luyện. Dùng /train để cung cấp thông tin nhé!)"
         else:
-            # Xử lý hội thoại thông thường
-            data = retrieve_data(chat_id, text)
             response = generate_response(chat_id, text, data)
 
         bot.send_message(chat_id=chat_id, text=response)
         logger.info(f"Sent response to {chat_id}: {response}")
         return "OK", 200
+
     except Exception as e:
         logger.error(f"Webhook error: {str(e)}")
+        bot.send_message(chat_id=chat_id, text="Đã xảy ra lỗi, vui lòng thử lại sau.")
         return "Error", 500
 
 @app.route("/health", methods=["GET"])
