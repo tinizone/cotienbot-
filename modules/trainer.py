@@ -79,7 +79,8 @@ def handle_train(user_id, command):
     except Exception as e:
         logger.error(f"Error handling /train for user {user_id}: {str(e)}")
         return f"Lỗi khi xử lý lệnh /train: {str(e)}"
-
+logger.debug(f"Chuẩn bị lưu dữ liệu cho user {user_id}: {data}")
+save_to_firestore(user_id, data)
 # Hàm save_to_firestore được giả định từ storage.py
 def save_to_firestore(user_id, data):
     from modules.storage import save_to_firestore
