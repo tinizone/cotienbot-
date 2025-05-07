@@ -12,6 +12,16 @@ from utils.cleaner import clean_input
 app = Flask(__name__)
 bot = telegram.Bot(token=os.getenv("TELEGRAM_TOKEN"))
 
+@app.route("/", methods=["GET"])
+def home():
+    """Trả về thông tin bot khi truy cập root."""
+    return "Cotienbot webhook server. Use Telegram to interact.", 200
+
+@app.route("/webhook", methods=["GET"])
+def webhook_get():
+    """Xử lý yêu cầu GET đến /webhook (không hỗ trợ)."""
+    return "Method GET not allowed. Use POST for Telegram webhook.", 405
+
 @app.route("/webhook", methods=["POST"])
 def webhook():
     """Xử lý tin nhắn từ Telegram qua webhook."""
