@@ -4,9 +4,14 @@ import json
 import logging
 from google.oauth2.service_account import Credentials
 from google.cloud import firestore
+from sentence_transformers import SentenceTransformer
+import numpy as np
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
+
+# Khởi tạo mô hình nhẹ
+model = SentenceTransformer('paraphrase-MiniLM-L3-v2')
 
 _firestore_client = None
 
@@ -50,6 +55,16 @@ def save_to_firestore(user_id, data):
         if not data or not isinstance(data, dict):
             logger.error(f"Dữ liệu không hợp lệ cho user {user_id}: {data}")
             raise ValueError("Dữ liệu không hợp lệ")
+        
+        # Tính embedding cho nội dung
+        content = data.get("content", "")
+        if content:
+            embedding = model.encode(content, convert_to_tensor=False).tolist()
+            data["embedding"] = embedding
+        else:
+            logger.warning(f"No content to embed for user {user_id}")
+            data["embedding"] = []
+
         db = _get_firestore_client()
         data_with_timestamp = {
             **data,
@@ -80,7 +95,7 @@ def get_user_data(user_id):
     try:
         user_id = str(user_id)
         db = _get_firestore_client()
-        docs = db.collection("users").document(user_id).collection("trained_data").stream()  # Lấy tất cả bản ghi
+        docs = db.collection("users").document(user_id).collection("trained_data").stream()
         data = [doc.to_dict() for doc in docs]
         logger.info(f"Lấy {len(data)} bản ghi từ Firestore cho user {user_id}")
         return data
