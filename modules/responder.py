@@ -15,6 +15,13 @@ def generate_response(user_id, query, data):
             save_to_chat_history(user_id, query, response)
             return response
         
+        # Debug: Kiểm tra kết nối mạng
+        try:
+            test_response = requests.get("https://www.google.com", timeout=5)
+            print(f"Debug: Test connection to Google: {test_response.status_code}")
+        except Exception as e:
+            print(f"Debug: Test connection error: {str(e)}")
+
         # Cấu hình retry cho requests
         session = requests.Session()
         retries = Retry(total=3, backoff_factor=1, status_forcelist=[502, 503, 504])
@@ -37,18 +44,22 @@ def generate_response(user_id, query, data):
             }
         }
         
+        print(f"Debug: Sending Gemini request: {payload}")
         response = session.post(gemini_url, json=payload, headers=headers, timeout=5)
+        print(f"Debug: Gemini response status: {response.status_code}, body: {response.text}")
+
         if response.status_code == 200:
             text = response.json().get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "Không có phản hồi từ Gemini.")
             full_response = f"[Gemini] {text}"
             save_to_chat_history(user_id, query, full_response)
             return full_response
         
-        error_msg = f"Gemini API error: {response.status_code} - {response.text}"
+        error_msg = f"Lỗi Gemini API: {response.status_code} - {response.text}"
         save_to_chat_history(user_id, query, error_msg)
-        return error_msg
-    
+        return "Hệ thống AI tạm thời không khả dụng, vui lòng thử lại sau."
+
     except requests.exceptions.RequestException as e:
-        error_msg = f"Lỗi khi gọi Gemini API: {str(e)}"
+        error_msg = f"Hệ thống AI tạm thời không khả dụng do lỗi mạng: {str(e)}"
+        print(f"Debug: Gemini error: {str(e)}")
         save_to_chat_history(user_id, query, error_msg)
         return error_msg
